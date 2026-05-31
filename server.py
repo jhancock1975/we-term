@@ -87,9 +87,14 @@ async def websocket_handler(request):
     return ws
 
 
+async def index_handler(request):
+    return web.FileResponse("static/index.html")
+
+
 app = web.Application()
 app.router.add_get("/ws", websocket_handler)
-app.router.add_static("/", "static", show_index=True)
+app.router.add_get("/", index_handler)
+app.router.add_static("/static", "static")
 
 if __name__ == "__main__":
     web.run_app(app, host="127.0.0.1", port=9090)
