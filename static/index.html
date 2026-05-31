@@ -27,17 +27,31 @@
         <textarea id="paste-area" placeholder="Tap here, then long-press → Paste"></textarea>
     </div>
     <div id="button-bar">
-        <button class="bar-btn modifier-btn" data-modifier="ctrl">Ctrl</button>
-        <button class="bar-btn modifier-btn" data-modifier="meta">Meta</button>
-        <button class="bar-btn" data-action="select" id="select-btn">Sel</button>
-        <button class="bar-btn" data-action="paste" id="paste-btn">Paste</button>
-        <button class="bar-btn" data-key="pageup">PgUp</button>
-        <button class="bar-btn" data-key="pagedown">PgDn</button>
-        <button class="bar-btn" data-key="up">&#9650;</button>
-        <button class="bar-btn" data-key="down">&#9660;</button>
-        <button class="bar-btn" data-key="left">&#9664;</button>
-        <button class="bar-btn" data-key="right">&#9654;</button>
-        <button class="bar-btn" data-key="enter" id="enter-btn">Enter</button>
+        <div id="button-scroll">
+            <button class="bar-btn modifier-btn" data-modifier="ctrl">Ctrl</button>
+            <button class="bar-btn modifier-btn" data-modifier="meta">Meta</button>
+            <button class="bar-btn" data-key="tab">Tab</button>
+            <button class="bar-btn" data-action="select" id="select-btn">Sel</button>
+            <button class="bar-btn" data-action="paste" id="paste-btn">Paste</button>
+            <button class="bar-btn" data-key="pageup">PgUp</button>
+            <button class="bar-btn" data-key="pagedown">PgDn</button>
+            <button class="bar-btn" data-key="up">&#9650;</button>
+            <button class="bar-btn" data-key="down">&#9660;</button>
+            <button class="bar-btn" data-key="left">&#9664;</button>
+            <button class="bar-btn" data-key="right">&#9654;</button>
+            <button class="bar-btn" data-key="num" data-char="0">0</button>
+            <button class="bar-btn" data-key="num" data-char="1">1</button>
+            <button class="bar-btn" data-key="num" data-char="2">2</button>
+            <button class="bar-btn" data-key="num" data-char="3">3</button>
+            <button class="bar-btn" data-key="num" data-char="4">4</button>
+            <button class="bar-btn" data-key="num" data-char="5">5</button>
+            <button class="bar-btn" data-key="num" data-char="6">6</button>
+            <button class="bar-btn" data-key="num" data-char="7">7</button>
+            <button class="bar-btn" data-key="num" data-char="8">8</button>
+            <button class="bar-btn" data-key="num" data-char="9">9</button>
+            <button class="bar-btn" data-key="enter" id="enter-btn">Enter</button>
+            <button class="bar-btn" data-key="escape">Esc</button>
+        </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.js"></script>

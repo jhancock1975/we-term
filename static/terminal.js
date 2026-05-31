@@ -266,6 +266,8 @@ document.addEventListener("DOMContentLoaded", function () {
         pageup: "\x1b[5~",
         pagedown: "\x1b[6~",
         enter: "\r",
+        tab: "\t",
+        escape: "\x1b",
     };
 
     function applyModifiers(seq) {
@@ -310,6 +312,13 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         var key = btn.getAttribute("data-key");
+        if (key === "num") {
+            var ch = btn.getAttribute("data-char");
+            var seq = applyModifiers(ch);
+            sendInput(seq);
+            term.focus();
+            return;
+        }
         if (key && keyMap[key] !== undefined) {
             var seq = applyModifiers(keyMap[key]);
             sendInput(seq);
@@ -318,11 +327,18 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     document.querySelectorAll(".bar-btn").forEach(function (btn) {
+        var touchStartX = 0;
+        var touchStartY = 0;
+
         btn.addEventListener("touchstart", function (e) {
-            e.preventDefault();
-        });
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
 
         btn.addEventListener("touchend", function (e) {
+            var dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
+            var dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
+            if (dx > 10 || dy > 10) return; // was a scroll, not a tap
             e.preventDefault();
             handleBtnAction(btn);
         });

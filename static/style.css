@@ -26,19 +26,31 @@ html, body {
 }
 
 #button-bar {
+    background: #2d2d2d;
+    border-top: 1px solid #444;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+#button-scroll {
     display: flex;
     flex-wrap: nowrap;
     gap: 3px;
     padding: 5px 4px;
-    background: #2d2d2d;
-    border-top: 1px solid #444;
-    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+#button-scroll::-webkit-scrollbar {
+    display: none;
 }
 
 .bar-btn {
-    flex: 1;
-    min-width: 0;
-    padding: 10px 0;
+    flex: 0 0 auto;
+    min-width: 38px;
+    padding: 10px 8px;
     background: #3c3c3c;
     color: #d4d4d4;
     border: 1px solid #555;
@@ -46,10 +58,11 @@ html, body {
     font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
     font-size: 12px;
     cursor: pointer;
-    touch-action: manipulation;
+    touch-action: pan-x;
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
+    white-space: nowrap;
 }
 
 .bar-btn:active {
