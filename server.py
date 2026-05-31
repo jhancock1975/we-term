@@ -170,8 +170,12 @@ async def websocket_handler(request):
     return ws
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+
 async def index_handler(request):
-    return web.FileResponse("static/index.html")
+    return web.FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
 async def upload_handler(request):
@@ -206,7 +210,9 @@ app = web.Application()
 app.router.add_get("/ws", websocket_handler)
 app.router.add_get("/", index_handler)
 app.router.add_post("/upload", upload_handler)
-app.router.add_static("/static", "static")
+app.router.add_static("/static", STATIC_DIR)
 
 if __name__ == "__main__":
-    web.run_app(app, host="10.0.0.196", port=9090)
+    host = os.environ.get("WETERM_HOST", "10.0.0.196")
+    port = int(os.environ.get("WETERM_PORT", "9090"))
+    web.run_app(app, host=host, port=port)

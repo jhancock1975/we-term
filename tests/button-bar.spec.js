@@ -1,32 +1,15 @@
 const { test, expect } = require("@playwright/test");
-const { spawn } = require("child_process");
-const path = require("path");
+const { startServer, waitForServer, stopServer } = require("./helpers");
 
 let serverProcess;
 
 test.beforeAll(async () => {
-    const venvPython = path.join(__dirname, "..", "venv", "bin", "python");
-    const serverScript = path.join(__dirname, "..", "server.py");
-    serverProcess = spawn(venvPython, [serverScript], {
-        cwd: path.join(__dirname, ".."),
-        stdio: "pipe",
-    });
-    await new Promise((resolve) => {
-        serverProcess.stderr.on("data", (data) => {
-            if (data.toString().includes("Running on")) resolve();
-        });
-        setTimeout(resolve, 3000);
-    });
+    serverProcess = startServer();
+    await waitForServer(serverProcess);
 });
 
 test.afterAll(async () => {
-    if (serverProcess) {
-        serverProcess.kill("SIGKILL");
-        await new Promise((resolve) => {
-            serverProcess.on("close", resolve);
-            setTimeout(resolve, 2000);
-        });
-    }
+    await stopServer(serverProcess);
 });
 
 const WS_INTERCEPT_SCRIPT = `
@@ -68,7 +51,6 @@ test("Ctrl+C via mouse click sends \\x03", async ({ page }) => {
     expect(inputs.length).toBeGreaterThan(0);
     expect(inputs[inputs.length - 1].data).toBe("\x03");
 
-    // Ctrl should clear after keypress
     await expect(ctrlBtn).not.toHaveClass(/active/, { timeout: 2000 });
 });
 
@@ -109,22 +91,18 @@ test("Touch tap on Ctrl toggles active and Ctrl+C works", async ({ browser }) =>
     await page.waitForFunction(() => window.__wsSent.length > 0, {}, { timeout: 10000 });
     await page.waitForTimeout(1500);
 
-    // Tap terminal to get focus
     await page.locator("#terminal .xterm-screen").tap();
     await page.waitForTimeout(200);
     await page.evaluate(() => { window.__wsSent = []; });
 
-    // Tap Ctrl button (touch event)
     var ctrlBtn = page.locator('[data-modifier="ctrl"]');
     await ctrlBtn.tap();
     await page.waitForTimeout(200);
 
-    // Verify active class is set
     var hasActive = await ctrlBtn.evaluate((el) => el.classList.contains("active"));
     console.log("Touch: Ctrl active after tap:", hasActive);
     expect(hasActive).toBe(true);
 
-    // Type 'c'
     await page.keyboard.press("c");
     await page.waitForTimeout(500);
 
@@ -134,7 +112,6 @@ test("Touch tap on Ctrl toggles active and Ctrl+C works", async ({ browser }) =>
     expect(inputs.length).toBeGreaterThan(0);
     expect(inputs[inputs.length - 1].data).toBe("\x03");
 
-    // Verify active cleared
     hasActive = await ctrlBtn.evaluate((el) => el.classList.contains("active"));
     expect(hasActive).toBe(false);
 

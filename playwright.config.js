@@ -1,10 +1,12 @@
 const { defineConfig } = require("@playwright/test");
 
+const TEST_PORT = 19090;
+
 module.exports = defineConfig({
     testDir: "./tests",
     timeout: 30000,
     use: {
-        baseURL: "http://10.0.0.196:9090",
+        baseURL: "http://127.0.0.1:" + TEST_PORT,
         headless: true,
     },
     projects: [
