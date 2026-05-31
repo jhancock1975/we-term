@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", function () {
             background: "#1e1e1e",
             foreground: "#d4d4d4",
         },
+        rightClickSelectsWord: true,
     });
 
     var fitAddon = new FitAddon.FitAddon();
@@ -14,38 +15,71 @@ document.addEventListener("DOMContentLoaded", function () {
     term.open(document.getElementById("terminal"));
     fitAddon.fit();
 
-    var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    var ws = new WebSocket(protocol + "//" + window.location.host + "/ws");
-    ws.binaryType = "arraybuffer";
+    // --- WebSocket with auto-reconnect ---
 
-    ws.addEventListener("open", function () {
-        sendResize();
-    });
+    var ws = null;
+    var reconnectDelay = 500;
+    var maxReconnectDelay = 5000;
+    var currentDelay = reconnectDelay;
 
-    ws.addEventListener("message", function (event) {
-        if (event.data instanceof ArrayBuffer) {
-            term.write(new Uint8Array(event.data));
-        } else {
-            term.write(event.data);
+    function connectWs() {
+        var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        ws = new WebSocket(protocol + "//" + window.location.host + "/ws");
+        ws.binaryType = "arraybuffer";
+
+        ws.addEventListener("open", function () {
+            currentDelay = reconnectDelay;
+            sendResize();
+        });
+
+        ws.addEventListener("message", function (event) {
+            if (event.data instanceof ArrayBuffer) {
+                term.write(new Uint8Array(event.data));
+            } else {
+                term.write(event.data);
+            }
+        });
+
+        ws.addEventListener("close", function () {
+            scheduleReconnect();
+        });
+
+        ws.addEventListener("error", function () {
+            // error is followed by close, reconnect handled there
+        });
+    }
+
+    function scheduleReconnect() {
+        setTimeout(function () {
+            connectWs();
+            currentDelay = Math.min(currentDelay * 2, maxReconnectDelay);
+        }, currentDelay);
+    }
+
+    connectWs();
+
+    // Reconnect when tab becomes visible again
+    document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") {
+            if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+                currentDelay = reconnectDelay;
+                connectWs();
+            }
         }
-    });
-
-    ws.addEventListener("close", function () {
-        term.write("\r\n\r\n[Connection closed]\r\n");
     });
 
     term.onData(function (data) {
         if (modifiers.ctrl || modifiers.meta) {
             data = applyModifiers(data);
         }
-        if (ws.readyState === WebSocket.OPEN) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
             var payload = JSON.stringify({ type: "input", data: data });
             ws.send(payload);
         }
     });
 
     function sendResize() {
-        if (ws.readyState === WebSocket.OPEN) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
             var payload = JSON.stringify({
                 type: "resize",
                 cols: term.cols,
@@ -62,6 +96,120 @@ document.addEventListener("DOMContentLoaded", function () {
 
     window.addEventListener("resize", doFit);
 
+    // --- Toast notification ---
+
+    var toastEl = document.getElementById("toast");
+    var toastTimer = null;
+
+    function showToast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add("show");
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () {
+            toastEl.classList.remove("show");
+        }, 1500);
+    }
+
+    // --- Copy / Paste ---
+
+    function sendInput(data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            var payload = JSON.stringify({ type: "input", data: data });
+            ws.send(payload);
+        }
+    }
+
+    function doCopy() {
+        var sel = term.getSelection();
+        if (sel) {
+            navigator.clipboard.writeText(sel).then(function () {
+                showToast("Copied");
+            });
+        } else {
+            showToast("Nothing selected");
+        }
+        term.focus();
+    }
+
+    function doPaste() {
+        navigator.clipboard.read().then(function (items) {
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                var imageType = null;
+                for (var j = 0; j < item.types.length; j++) {
+                    if (item.types[j].indexOf("image/") === 0) {
+                        imageType = item.types[j];
+                        break;
+                    }
+                }
+                if (imageType) {
+                    item.getType(imageType).then(function (blob) {
+                        uploadImage(blob);
+                    });
+                    return;
+                }
+            }
+            navigator.clipboard.readText().then(function (text) {
+                if (text) {
+                    sendInput(text);
+                    showToast("Pasted");
+                }
+                term.focus();
+            });
+        }).catch(function () {
+            navigator.clipboard.readText().then(function (text) {
+                if (text) {
+                    sendInput(text);
+                    showToast("Pasted");
+                }
+                term.focus();
+            });
+        });
+    }
+
+    function uploadImage(blob) {
+        var formData = new FormData();
+        formData.append("image", blob);
+
+        showToast("Uploading image...");
+
+        fetch("/upload", { method: "POST", body: formData })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.path) {
+                    sendInput(data.path + " ");
+                    showToast("Image saved");
+                } else {
+                    showToast("Upload failed");
+                }
+                term.focus();
+            })
+            .catch(function () {
+                showToast("Upload failed");
+                term.focus();
+            });
+    }
+
+    // Handle paste events on the terminal (keyboard Ctrl+V / OS paste)
+    var termEl = document.getElementById("terminal");
+
+    termEl.addEventListener("paste", function (e) {
+        e.preventDefault();
+        var items = e.clipboardData.items;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf("image/") === 0) {
+                var blob = items[i].getAsFile();
+                if (blob) uploadImage(blob);
+                return;
+            }
+        }
+        var text = e.clipboardData.getData("text/plain");
+        if (text) {
+            sendInput(text);
+            showToast("Pasted");
+        }
+    });
+
     // --- Button bar ---
 
     var modifiers = { ctrl: false, meta: false };
@@ -77,13 +225,6 @@ document.addEventListener("DOMContentLoaded", function () {
         pagedown: "\x1b[6~",
         enter: "\r",
     };
-
-    function sendInput(data) {
-        if (ws.readyState === WebSocket.OPEN) {
-            var payload = JSON.stringify({ type: "input", data: data });
-            ws.send(payload);
-        }
-    }
 
     function applyModifiers(seq) {
         if (modifiers.ctrl && seq.length === 1) {
@@ -113,6 +254,16 @@ document.addEventListener("DOMContentLoaded", function () {
             modifiers[mod] = !modifiers[mod];
             btn.classList.toggle("active", modifiers[mod]);
             term.focus();
+            return;
+        }
+
+        var action = btn.getAttribute("data-action");
+        if (action === "copy") {
+            doCopy();
+            return;
+        }
+        if (action === "paste") {
+            doPaste();
             return;
         }
 

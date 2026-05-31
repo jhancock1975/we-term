@@ -2,16 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>we-term</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div id="terminal"></div>
+    <div id="toast"></div>
     <div id="button-bar">
         <button class="bar-btn modifier-btn" data-modifier="ctrl">Ctrl</button>
         <button class="bar-btn modifier-btn" data-modifier="meta">Meta</button>
+        <button class="bar-btn" data-action="copy" id="copy-btn">Copy</button>
+        <button class="bar-btn" data-action="paste" id="paste-btn">Paste</button>
         <button class="bar-btn" data-key="pageup">PgUp</button>
         <button class="bar-btn" data-key="pagedown">PgDn</button>
         <button class="bar-btn" data-key="up">&#9650;</button>
