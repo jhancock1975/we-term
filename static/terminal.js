@@ -114,7 +114,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     var selectOverlay = document.getElementById("select-overlay");
     var selectContent = document.getElementById("select-content");
-    var selectCopyBtn = document.getElementById("select-copy-btn");
     var selectDoneBtn = document.getElementById("select-done-btn");
 
     function openSelectMode() {
@@ -135,21 +134,6 @@ document.addEventListener("DOMContentLoaded", function () {
         selectContent.textContent = "";
         term.focus();
     }
-
-    selectCopyBtn.addEventListener("click", function () {
-        var sel = window.getSelection().toString();
-        if (!sel) {
-            showToast("Nothing selected");
-            return;
-        }
-        // execCommand('copy') works on plain HTTP with an active selection
-        try {
-            document.execCommand("copy");
-            showToast("Copied");
-        } catch (e) {
-            showToast("Select text, then use long-press → Copy");
-        }
-    });
 
     selectDoneBtn.addEventListener("click", closeSelectMode);
 

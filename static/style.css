@@ -119,8 +119,7 @@ html, body {
     touch-action: manipulation;
 }
 
-#select-toolbar button:last-child {
-    background: #555;
+#select-toolbar button {
     margin-left: auto;
 }
 
