@@ -110,17 +110,34 @@ document.addEventListener("DOMContentLoaded", function () {
         }, 1500);
     }
 
-    // --- Copy / Paste ---
+    // --- Select overlay ---
 
-    function sendInput(data) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            var payload = JSON.stringify({ type: "input", data: data });
-            ws.send(payload);
+    var selectOverlay = document.getElementById("select-overlay");
+    var selectContent = document.getElementById("select-content");
+    var selectCopyBtn = document.getElementById("select-copy-btn");
+    var selectDoneBtn = document.getElementById("select-done-btn");
+
+    function openSelectMode() {
+        var lines = [];
+        var buffer = term.buffer.active;
+        for (var i = 0; i <= buffer.length - 1; i++) {
+            var line = buffer.getLine(i);
+            if (line) {
+                lines.push(line.translateToString(true));
+            }
         }
+        selectContent.textContent = lines.join("\n");
+        selectOverlay.classList.remove("hidden");
     }
 
-    function doCopy() {
-        var sel = term.getSelection();
+    function closeSelectMode() {
+        selectOverlay.classList.add("hidden");
+        selectContent.textContent = "";
+        term.focus();
+    }
+
+    selectCopyBtn.addEventListener("click", function () {
+        var sel = window.getSelection().toString();
         if (sel) {
             navigator.clipboard.writeText(sel).then(function () {
                 showToast("Copied");
@@ -128,7 +145,17 @@ document.addEventListener("DOMContentLoaded", function () {
         } else {
             showToast("Nothing selected");
         }
-        term.focus();
+    });
+
+    selectDoneBtn.addEventListener("click", closeSelectMode);
+
+    // --- Copy / Paste ---
+
+    function sendInput(data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            var payload = JSON.stringify({ type: "input", data: data });
+            ws.send(payload);
+        }
     }
 
     function doPaste() {
@@ -258,8 +285,8 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         var action = btn.getAttribute("data-action");
-        if (action === "copy") {
-            doCopy();
+        if (action === "select") {
+            openSelectMode();
             return;
         }
         if (action === "paste") {

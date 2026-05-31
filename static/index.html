@@ -12,10 +12,17 @@
 <body>
     <div id="terminal"></div>
     <div id="toast"></div>
+    <div id="select-overlay" class="hidden">
+        <div id="select-toolbar">
+            <button id="select-copy-btn">Copy Selection</button>
+            <button id="select-done-btn">Done</button>
+        </div>
+        <pre id="select-content"></pre>
+    </div>
     <div id="button-bar">
         <button class="bar-btn modifier-btn" data-modifier="ctrl">Ctrl</button>
         <button class="bar-btn modifier-btn" data-modifier="meta">Meta</button>
-        <button class="bar-btn" data-action="copy" id="copy-btn">Copy</button>
+        <button class="bar-btn" data-action="select" id="select-btn">Sel</button>
         <button class="bar-btn" data-action="paste" id="paste-btn">Paste</button>
         <button class="bar-btn" data-key="pageup">PgUp</button>
         <button class="bar-btn" data-key="pagedown">PgDn</button>
