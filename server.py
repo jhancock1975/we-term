@@ -13,8 +13,6 @@ from aiohttp import web
 UPLOAD_DIR = os.path.join(os.path.expanduser("~"), "we-term-uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-SESSION_TIMEOUT = 300
-
 
 class PtySession:
     def __init__(self):
@@ -48,6 +46,7 @@ class PtySession:
         self.master_fd = master_fd
         self.pid = pid
         self.alive = True
+        self.read_task = asyncio.create_task(self._read_pty())
 
     def is_alive(self):
         if not self.alive or self.pid is None:
@@ -69,16 +68,8 @@ class PtySession:
             await ws.send_bytes(bytes(self.buffer))
             self.buffer.clear()
 
-        if self.read_task is not None:
-            self.read_task.cancel()
-
-        self.read_task = asyncio.create_task(self._read_pty())
-
     def detach(self):
         self.ws = None
-        if self.read_task is not None:
-            self.read_task.cancel()
-            self.read_task = None
 
     async def _read_pty(self):
         loop = asyncio.get_event_loop()
@@ -92,7 +83,12 @@ class PtySession:
                     if not data:
                         break
                     if self.ws is not None and not self.ws.closed:
-                        await self.ws.send_bytes(data)
+                        try:
+                            await self.ws.send_bytes(data)
+                        except (ConnectionError, OSError):
+                            self.buffer.extend(data)
+                            if len(self.buffer) > self.max_buffer:
+                                self.buffer = self.buffer[-self.max_buffer:]
                     else:
                         self.buffer.extend(data)
                         if len(self.buffer) > self.max_buffer:
@@ -112,8 +108,11 @@ class PtySession:
             fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
 
     async def destroy(self):
-        self.detach()
+        self.ws = None
         self.alive = False
+        if self.read_task is not None:
+            self.read_task.cancel()
+            self.read_task = None
         if self.pid is not None:
             try:
                 os.kill(self.pid, signal.SIGTERM)
