@@ -51,6 +51,8 @@ html, body {
 
 .bar-btn.active {
     background: #007acc;
-    border-color: #007acc;
+    border-color: #60c0ff;
     color: #fff;
+    box-shadow: 0 0 8px rgba(0, 122, 204, 0.7), inset 0 0 4px rgba(96, 192, 255, 0.3);
+    font-weight: bold;
 }

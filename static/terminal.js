@@ -107,27 +107,36 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
+    function handleBtnAction(btn) {
+        var mod = btn.getAttribute("data-modifier");
+        if (mod) {
+            modifiers[mod] = !modifiers[mod];
+            btn.classList.toggle("active", modifiers[mod]);
+            term.focus();
+            return;
+        }
+
+        var key = btn.getAttribute("data-key");
+        if (key && keyMap[key] !== undefined) {
+            var seq = applyModifiers(keyMap[key]);
+            sendInput(seq);
+        }
+        term.focus();
+    }
+
     document.querySelectorAll(".bar-btn").forEach(function (btn) {
         btn.addEventListener("touchstart", function (e) {
             e.preventDefault();
         });
 
+        btn.addEventListener("touchend", function (e) {
+            e.preventDefault();
+            handleBtnAction(btn);
+        });
+
         btn.addEventListener("click", function (e) {
             e.preventDefault();
-            var mod = btn.getAttribute("data-modifier");
-            if (mod) {
-                modifiers[mod] = !modifiers[mod];
-                btn.classList.toggle("active", modifiers[mod]);
-                term.focus();
-                return;
-            }
-
-            var key = btn.getAttribute("data-key");
-            if (key && keyMap[key] !== undefined) {
-                var seq = applyModifiers(keyMap[key]);
-                sendInput(seq);
-            }
-            term.focus();
+            handleBtnAction(btn);
         });
     });
 

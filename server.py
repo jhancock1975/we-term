@@ -76,7 +76,10 @@ async def websocket_handler(request):
         read_task.cancel()
         try:
             os.kill(pid, signal.SIGTERM)
-            os.waitpid(pid, 0)
+        except OSError:
+            pass
+        try:
+            await loop.run_in_executor(None, os.waitpid, pid, 0)
         except (OSError, ChildProcessError):
             pass
         try:
@@ -97,4 +100,4 @@ app.router.add_get("/", index_handler)
 app.router.add_static("/static", "static")
 
 if __name__ == "__main__":
-    web.run_app(app, host="127.0.0.1", port=9090)
+    web.run_app(app, host="10.0.0.196", port=9090)
