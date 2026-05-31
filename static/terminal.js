@@ -333,28 +333,43 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     });
 
-    // --- Keyboard visibility detection ---
+    // --- Keyboard visibility detection + terminal resize ---
 
     var keyboardVisible = false;
 
-    function updateBarPosition() {
+    function updateLayout() {
         if (window.visualViewport) {
-            var viewportHeight = window.visualViewport.height;
+            var vpHeight = window.visualViewport.height;
+            var vpOffsetTop = window.visualViewport.offsetTop;
             var fullHeight = window.innerHeight;
-            var keyboardNow = fullHeight - viewportHeight > 100;
+            var keyboardNow = fullHeight - vpHeight > 100;
 
             if (keyboardNow !== keyboardVisible) {
                 keyboardVisible = keyboardNow;
                 enterBtn.style.display = keyboardVisible ? "none" : "";
             }
 
+            // Scroll the page to top so terminal starts at screen top
+            window.scrollTo(0, 0);
+
             if (keyboardVisible) {
-                var offset = fullHeight - viewportHeight;
-                buttonBar.style.position = "fixed";
-                buttonBar.style.bottom = offset + "px";
-                buttonBar.style.left = "0";
-                buttonBar.style.right = "0";
+                // Resize everything to fit within the visual viewport
+                var barHeight = buttonBar.offsetHeight;
+                var availableHeight = vpHeight - barHeight;
+
+                document.body.style.height = vpHeight + "px";
+                termEl.style.height = availableHeight + "px";
+                termEl.style.flex = "none";
+
+                buttonBar.style.position = "";
+                buttonBar.style.bottom = "";
+                buttonBar.style.left = "";
+                buttonBar.style.right = "";
             } else {
+                document.body.style.height = "";
+                termEl.style.height = "";
+                termEl.style.flex = "";
+
                 buttonBar.style.position = "";
                 buttonBar.style.bottom = "";
                 buttonBar.style.left = "";
@@ -366,9 +381,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (window.visualViewport) {
-        window.visualViewport.addEventListener("resize", updateBarPosition);
-        window.visualViewport.addEventListener("scroll", updateBarPosition);
+        window.visualViewport.addEventListener("resize", updateLayout);
+        window.visualViewport.addEventListener("scroll", updateLayout);
     }
 
-    updateBarPosition();
+    updateLayout();
 });

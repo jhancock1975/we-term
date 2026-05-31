@@ -43,8 +43,8 @@ html, body {
     color: #d4d4d4;
     border: 1px solid #555;
     border-radius: 4px;
-    font-family: inherit;
-    font-size: 13px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+    font-size: 12px;
     cursor: pointer;
     touch-action: manipulation;
     user-select: none;
