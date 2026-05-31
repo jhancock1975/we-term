@@ -138,60 +138,91 @@ document.addEventListener("DOMContentLoaded", function () {
 
     selectCopyBtn.addEventListener("click", function () {
         var sel = window.getSelection().toString();
-        if (sel) {
-            navigator.clipboard.writeText(sel).then(function () {
-                showToast("Copied");
-            });
-        } else {
+        if (!sel) {
             showToast("Nothing selected");
+            return;
+        }
+        // execCommand('copy') works on plain HTTP with an active selection
+        try {
+            document.execCommand("copy");
+            showToast("Copied");
+        } catch (e) {
+            showToast("Select text, then use long-press → Copy");
         }
     });
 
     selectDoneBtn.addEventListener("click", closeSelectMode);
 
-    // --- Copy / Paste ---
+    // --- Paste overlay ---
+
+    var pasteOverlay = document.getElementById("paste-overlay");
+    var pasteArea = document.getElementById("paste-area");
+    var pasteSendBtn = document.getElementById("paste-send-btn");
+    var pasteCancelBtn = document.getElementById("paste-cancel-btn");
+
+    function openPasteMode() {
+        pasteArea.value = "";
+        pasteOverlay.classList.remove("hidden");
+        pasteArea.focus();
+    }
+
+    function closePasteMode() {
+        pasteOverlay.classList.add("hidden");
+        pasteArea.value = "";
+        term.focus();
+    }
+
+    // Capture image pastes in the paste area
+    pasteArea.addEventListener("paste", function (e) {
+        var items = e.clipboardData.items;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf("image/") === 0) {
+                e.preventDefault();
+                var blob = items[i].getAsFile();
+                if (blob) {
+                    uploadImage(blob);
+                    closePasteMode();
+                }
+                return;
+            }
+        }
+        // Text paste: let native paste fill the textarea, send on button click
+    });
+
+    pasteSendBtn.addEventListener("click", function () {
+        var text = pasteArea.value;
+        if (text) {
+            sendInput(text);
+            showToast("Pasted");
+        }
+        closePasteMode();
+    });
+
+    pasteSendBtn.addEventListener("touchstart", function (e) { e.preventDefault(); });
+    pasteSendBtn.addEventListener("touchend", function (e) {
+        e.preventDefault();
+        var text = pasteArea.value;
+        if (text) {
+            sendInput(text);
+            showToast("Pasted");
+        }
+        closePasteMode();
+    });
+
+    pasteCancelBtn.addEventListener("click", closePasteMode);
+    pasteCancelBtn.addEventListener("touchstart", function (e) { e.preventDefault(); });
+    pasteCancelBtn.addEventListener("touchend", function (e) {
+        e.preventDefault();
+        closePasteMode();
+    });
+
+    // --- Helpers ---
 
     function sendInput(data) {
         if (ws && ws.readyState === WebSocket.OPEN) {
             var payload = JSON.stringify({ type: "input", data: data });
             ws.send(payload);
         }
-    }
-
-    function doPaste() {
-        navigator.clipboard.read().then(function (items) {
-            for (var i = 0; i < items.length; i++) {
-                var item = items[i];
-                var imageType = null;
-                for (var j = 0; j < item.types.length; j++) {
-                    if (item.types[j].indexOf("image/") === 0) {
-                        imageType = item.types[j];
-                        break;
-                    }
-                }
-                if (imageType) {
-                    item.getType(imageType).then(function (blob) {
-                        uploadImage(blob);
-                    });
-                    return;
-                }
-            }
-            navigator.clipboard.readText().then(function (text) {
-                if (text) {
-                    sendInput(text);
-                    showToast("Pasted");
-                }
-                term.focus();
-            });
-        }).catch(function () {
-            navigator.clipboard.readText().then(function (text) {
-                if (text) {
-                    sendInput(text);
-                    showToast("Pasted");
-                }
-                term.focus();
-            });
-        });
     }
 
     function uploadImage(blob) {
@@ -217,7 +248,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
     }
 
-    // Handle paste events on the terminal (keyboard Ctrl+V / OS paste)
+    // Handle paste events directly on the terminal (desktop Ctrl+V)
     var termEl = document.getElementById("terminal");
 
     termEl.addEventListener("paste", function (e) {
@@ -290,7 +321,7 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
         if (action === "paste") {
-            doPaste();
+            openPasteMode();
             return;
         }
 
