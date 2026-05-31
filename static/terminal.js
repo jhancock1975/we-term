@@ -35,6 +35,9 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     term.onData(function (data) {
+        if (modifiers.ctrl || modifiers.meta) {
+            data = applyModifiers(data);
+        }
         if (ws.readyState === WebSocket.OPEN) {
             var payload = JSON.stringify({ type: "input", data: data });
             ws.send(payload);
