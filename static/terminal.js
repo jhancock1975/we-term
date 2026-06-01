@@ -1,6 +1,36 @@
 document.addEventListener("DOMContentLoaded", function () {
+    var settingsStorageKey = "we-term-settings";
+
+    function loadSettings() {
+        var defaults = { cursorBlink: true, hapticFeedback: true };
+        try {
+            var raw = localStorage.getItem(settingsStorageKey);
+            if (!raw) {
+                return defaults;
+            }
+            var parsed = JSON.parse(raw);
+            return {
+                cursorBlink: parsed.cursorBlink !== false,
+                hapticFeedback: parsed.hapticFeedback !== false,
+            };
+        } catch (err) {
+            return defaults;
+        }
+    }
+
+    function saveSettings(settings) {
+        try {
+            localStorage.setItem(settingsStorageKey, JSON.stringify(settings));
+        } catch (err) {
+            // Ignore storage write failures and keep runtime behavior.
+        }
+    }
+
+    var settings = loadSettings();
     var term = new Terminal({
-        cursorBlink: true,
+        cursorBlink: settings.cursorBlink,
+        cursorStyle: "block",
+        cursorInactiveStyle: "block",
         fontSize: 14,
         fontFamily: "'Cascadia Code', 'Fira Code', 'Menlo', monospace",
         theme: {
@@ -15,12 +45,18 @@ document.addEventListener("DOMContentLoaded", function () {
     term.open(document.getElementById("terminal"));
     fitAddon.fit();
     var termEl = document.getElementById("terminal");
+    var settingsPanel = document.getElementById("settings-panel");
+    var settingsCloseBtn = document.getElementById("settings-close-btn");
+    var cursorBlinkToggle = document.getElementById("cursor-blink-toggle");
+    var hapticFeedbackToggle = document.getElementById("haptic-feedback-toggle");
     var buttonBar = document.getElementById("button-bar");
     var touchKeyboardEl = document.getElementById("touch-keyboard");
+    var touchKeyPreviewEl = document.getElementById("touch-key-preview");
     var touchKeyboardEnabled = isTouchKeyboardEnabled();
     var touchKeyboardVisible = false;
     var shiftActive = false;
     var symbolMode = false;
+    var activeTouchPreviewKey = null;
 
     // --- WebSocket with auto-reconnect ---
 
@@ -116,6 +152,52 @@ document.addEventListener("DOMContentLoaded", function () {
             toastEl.classList.remove("show");
         }, 1500);
     }
+
+    function syncCursorBlinkState() {
+        term.options.cursorBlink = settings.cursorBlink;
+        cursorBlinkToggle.checked = settings.cursorBlink;
+        hapticFeedbackToggle.checked = settings.hapticFeedback;
+        termEl.classList.toggle("touch-cursor-blink", touchKeyboardEnabled && settings.cursorBlink);
+        term.refresh(0, term.rows - 1);
+    }
+
+    function openSettingsPanel() {
+        setTouchKeyboardVisible(false);
+        settingsPanel.classList.remove("hidden");
+        settingsPanel.setAttribute("aria-hidden", "false");
+        cursorBlinkToggle.checked = settings.cursorBlink;
+        hapticFeedbackToggle.checked = settings.hapticFeedback;
+    }
+
+    function closeSettingsPanel(skipFocus) {
+        settingsPanel.classList.add("hidden");
+        settingsPanel.setAttribute("aria-hidden", "true");
+        if (!skipFocus) {
+            focusTerminal();
+        }
+    }
+
+    cursorBlinkToggle.addEventListener("change", function () {
+        settings.cursorBlink = cursorBlinkToggle.checked;
+        saveSettings(settings);
+        syncCursorBlinkState();
+    });
+
+    hapticFeedbackToggle.addEventListener("change", function () {
+        settings.hapticFeedback = hapticFeedbackToggle.checked;
+        saveSettings(settings);
+        syncCursorBlinkState();
+    });
+
+    settingsCloseBtn.addEventListener("click", function () {
+        closeSettingsPanel();
+    });
+
+    settingsPanel.addEventListener("click", function (e) {
+        if (e.target === settingsPanel) {
+            closeSettingsPanel();
+        }
+    });
 
     // --- Select overlay ---
 
@@ -251,16 +333,36 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function legacyCopyText(text) {
+        var activeElement = document.activeElement;
         var textarea = document.createElement("textarea");
         textarea.value = text;
+        textarea.setAttribute("aria-hidden", "true");
         textarea.setAttribute("readonly", "readonly");
         textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
+        textarea.style.top = "0";
+        textarea.style.left = "-9999px";
+        textarea.style.width = "1px";
+        textarea.style.height = "1px";
+        textarea.style.padding = "0";
+        textarea.style.border = "0";
+        textarea.style.opacity = "0.01";
         textarea.style.pointerEvents = "none";
+        textarea.style.fontSize = "16px";
         document.body.appendChild(textarea);
+        textarea.focus({ preventScroll: true });
         textarea.select();
-        var copied = document.execCommand("copy");
+        textarea.setSelectionRange(0, textarea.value.length);
+        var copied = false;
+        try {
+            copied = document.execCommand("copy");
+        } catch (err) {
+            copied = false;
+        }
+        textarea.blur();
         document.body.removeChild(textarea);
+        if (activeElement && activeElement.focus) {
+            activeElement.focus({ preventScroll: true });
+        }
         return copied;
     }
 
@@ -268,7 +370,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!text) {
             return Promise.resolve(false);
         }
-        if (navigator.clipboard && navigator.clipboard.writeText) {
+        if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
             return navigator.clipboard.writeText(text).then(function () {
                 return true;
             }, function () {
@@ -326,6 +428,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function openSelectMode(clientX, clientY) {
         setTouchKeyboardVisible(false);
+        closeSettingsPanel(true);
         var lines = [];
         var renderedRows = termEl.querySelector(".xterm-rows");
         if (renderedRows && renderedRows.children.length > 0) {
@@ -431,6 +534,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function openPasteMode() {
         setTouchKeyboardVisible(false);
+        closeSettingsPanel(true);
         pasteArea.value = "";
         pasteOverlay.classList.remove("hidden");
         pasteArea.focus();
@@ -587,8 +691,18 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function focusTerminal() {
-        if (!touchKeyboardEnabled) {
-            term.focus();
+        term.focus();
+        if (touchKeyboardEnabled && navigator.virtualKeyboard && navigator.virtualKeyboard.hide) {
+            navigator.virtualKeyboard.hide();
+        }
+    }
+
+    function triggerHapticFeedback() {
+        if (!settings.hapticFeedback || !touchKeyboardEnabled) {
+            return;
+        }
+        if (navigator.vibrate) {
+            navigator.vibrate(10);
         }
     }
 
@@ -681,11 +795,49 @@ document.addEventListener("DOMContentLoaded", function () {
                 if ((keyDef.key === "symbols" && symbolMode) || (keyDef.key === "letters" && !symbolMode)) {
                     classNames.push("active");
                 }
-                return "<button class=\"" + classNames.join(" ") + "\" data-touch-key=\"" + escapeHtml(dataTouchKey) + "\">" + escapeHtml(getTouchKeyLabel(keyDef)) + "</button>";
+                return "<button class=\"" + classNames.join(" ") + "\" data-touch-key=\"" + escapeHtml(dataTouchKey) + "\" data-touch-label=\"" + escapeHtml(getTouchKeyLabel(keyDef)) + "\">" + escapeHtml(getTouchKeyLabel(keyDef)) + "</button>";
             }).join("");
             return "<div class=\"touch-keyboard-row\">" + keysHtml + "</div>";
         }).join("");
         touchKeyboardEl.innerHTML = html;
+    }
+
+    function showTouchKeyPreview(btn) {
+        if (!touchKeyPreviewEl || !btn) {
+            return;
+        }
+        hideTouchKeyPreview();
+        activeTouchPreviewKey = btn;
+        btn.classList.add("preview-source");
+        touchKeyPreviewEl.textContent = btn.getAttribute("data-touch-label") || btn.textContent || "";
+        touchKeyPreviewEl.classList.remove("hidden");
+        touchKeyPreviewEl.setAttribute("aria-hidden", "false");
+
+        var rect = btn.getBoundingClientRect();
+        var previewWidth = Math.max(rect.width + 12, 48);
+        var left = rect.left + (rect.width / 2) - (previewWidth / 2);
+        var top = rect.top - 54;
+        var margin = 6;
+
+        left = Math.max(margin, Math.min(left, window.innerWidth - previewWidth - margin));
+        top = Math.max(margin, top);
+
+        touchKeyPreviewEl.style.width = previewWidth + "px";
+        touchKeyPreviewEl.style.left = left + "px";
+        touchKeyPreviewEl.style.top = top + "px";
+    }
+
+    function hideTouchKeyPreview() {
+        if (activeTouchPreviewKey) {
+            activeTouchPreviewKey.classList.remove("preview-source");
+            activeTouchPreviewKey = null;
+        }
+        if (!touchKeyPreviewEl) {
+            return;
+        }
+        touchKeyPreviewEl.classList.add("hidden");
+        touchKeyPreviewEl.setAttribute("aria-hidden", "true");
+        touchKeyPreviewEl.textContent = "";
     }
 
     function setTouchKeyboardVisible(visible) {
@@ -702,30 +854,36 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!visible) {
             shiftActive = false;
             symbolMode = false;
+            hideTouchKeyPreview();
         }
         renderTouchKeyboard();
         requestAnimationFrame(doFit);
     }
 
     function handleTouchKeyboardAction(keyName) {
+        hideTouchKeyPreview();
         if (keyName === "shift") {
             shiftActive = !shiftActive;
+            triggerHapticFeedback();
             renderTouchKeyboard();
             return;
         }
         if (keyName === "symbols") {
             symbolMode = true;
             shiftActive = false;
+            triggerHapticFeedback();
             renderTouchKeyboard();
             return;
         }
         if (keyName === "letters") {
             symbolMode = false;
             shiftActive = false;
+            triggerHapticFeedback();
             renderTouchKeyboard();
             return;
         }
         if (keyName === "hide") {
+            triggerHapticFeedback();
             setTouchKeyboardVisible(false);
             return;
         }
@@ -751,6 +909,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (modifiers.ctrl || modifiers.meta) {
             seq = applyModifiers(seq);
         }
+        triggerHapticFeedback();
         sendInput(seq);
 
         if (!symbolMode && shiftActive && !keyDef.key) {
@@ -771,12 +930,15 @@ document.addEventListener("DOMContentLoaded", function () {
             helperTextarea.readOnly = true;
             helperTextarea.setAttribute("readonly", "readonly");
             helperTextarea.setAttribute("inputmode", "none");
+            helperTextarea.setAttribute("virtualkeyboardpolicy", "manual");
             helperTextarea.setAttribute("autocapitalize", "off");
             helperTextarea.setAttribute("autocomplete", "off");
             helperTextarea.setAttribute("autocorrect", "off");
             helperTextarea.setAttribute("spellcheck", "false");
             helperTextarea.addEventListener("focus", function () {
-                helperTextarea.blur();
+                if (navigator.virtualKeyboard && navigator.virtualKeyboard.hide) {
+                    navigator.virtualKeyboard.hide();
+                }
                 setTouchKeyboardVisible(true);
             });
         }
@@ -828,6 +990,7 @@ document.addEventListener("DOMContentLoaded", function () {
             e.preventDefault();
             e.stopPropagation();
             setTouchKeyboardVisible(true);
+            focusTerminal();
         }, true);
 
         termEl.addEventListener("touchend", function (e) {
@@ -847,6 +1010,7 @@ document.addEventListener("DOMContentLoaded", function () {
             e.stopPropagation();
             suppressTerminalClickUntil = Date.now() + 300;
             setTouchKeyboardVisible(true);
+            focusTerminal();
         }, { passive: false, capture: true });
 
         termEl.addEventListener("touchcancel", function () {
@@ -866,6 +1030,22 @@ document.addEventListener("DOMContentLoaded", function () {
             e.preventDefault();
             handleTouchKeyboardAction(btn.getAttribute("data-touch-key"));
         });
+
+        touchKeyboardEl.addEventListener("pointerdown", function (e) {
+            var btn = e.target.closest(".touch-key");
+            if (!btn) {
+                return;
+            }
+            showTouchKeyPreview(btn);
+        });
+
+        touchKeyboardEl.addEventListener("pointerup", hideTouchKeyPreview);
+        touchKeyboardEl.addEventListener("pointercancel", hideTouchKeyPreview);
+        touchKeyboardEl.addEventListener("pointerleave", function (e) {
+            if (activeTouchPreviewKey && !touchKeyboardEl.contains(e.relatedTarget)) {
+                hideTouchKeyPreview();
+            }
+        });
     }
 
     function handleBtnAction(btn) {
@@ -882,6 +1062,10 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         var action = btn.getAttribute("data-action");
+        if (action === "settings") {
+            openSettingsPanel();
+            return;
+        }
         if (action === "select") {
             var rect = termEl.getBoundingClientRect();
             openSelectMode(rect.left + 48, rect.top + 24);
@@ -930,6 +1114,7 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     });
 
+    syncCursorBlinkState();
     configureTouchKeyboard();
 
     // --- Terminal resize ---

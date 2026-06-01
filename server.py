@@ -213,6 +213,6 @@ app.router.add_post("/upload", upload_handler)
 app.router.add_static("/static", STATIC_DIR)
 
 if __name__ == "__main__":
-    host = os.environ.get("WETERM_HOST", "10.0.0.196")
+    host = os.environ.get("WETERM_HOST", "0.0.0.0")
     port = int(os.environ.get("WETERM_PORT", "9090"))
     web.run_app(app, host=host, port=port)

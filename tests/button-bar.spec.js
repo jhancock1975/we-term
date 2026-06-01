@@ -33,6 +33,28 @@ async function waitForTerminalReady(page) {
     await page.waitForTimeout(1500);
 }
 
+async function waitForRenderedRows(page) {
+    await page.waitForFunction(() => {
+        var rows = document.querySelector("#terminal .xterm-rows");
+        return !!rows && rows.textContent.trim().length > 0;
+    }, {}, { timeout: 10000 });
+}
+
+async function ensureTouchTerminalOutput(page) {
+    var hasRows = await page.evaluate(() => {
+        var rows = document.querySelector("#terminal .xterm-rows");
+        return !!rows && rows.textContent.trim().length > 0;
+    });
+    if (hasRows) {
+        return;
+    }
+
+    await page.locator("#terminal .xterm-screen").tap();
+    await page.waitForTimeout(200);
+    await page.locator('[data-touch-key="enter"]').tap();
+    await waitForRenderedRows(page);
+}
+
 async function newTouchPage(browser, permissions) {
     var context = await browser.newContext({ hasTouch: true });
     if (permissions && permissions.length > 0) {
@@ -75,6 +97,7 @@ test("Long press selection shows copy popup, exits on second tap, and copies sel
 
     await page.goto("/");
     await waitForTerminalReady(page);
+    await ensureTouchTerminalOutput(page);
 
     await longPressTerminal(page, 72, 24, 650);
     await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 2000 });
@@ -103,6 +126,154 @@ test("Long press selection shows copy popup, exits on second tap, and copies sel
 
     var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboardText).toBe(selectedText);
+
+    await context.close();
+});
+
+test("Copy falls back when clipboard API is unavailable", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var context = result.context;
+    var page = result.page;
+
+    await page.addInitScript(() => {
+        window.__fallbackCopyText = "";
+        Object.defineProperty(window, "isSecureContext", {
+            configurable: true,
+            get: function () { return false; },
+        });
+        document.execCommand = function (command) {
+            if (command !== "copy") {
+                return false;
+            }
+            var active = document.activeElement;
+            window.__fallbackCopyText = active && "value" in active ? active.value : "";
+            return true;
+        };
+    });
+
+    await page.goto("/");
+    await waitForTerminalReady(page);
+    await ensureTouchTerminalOutput(page);
+
+    await longPressTerminal(page, 72, 24, 650);
+    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 2000 });
+    await page.waitForFunction(() => document.getElementById("select-overlay").dataset.selectedText.trim().length > 0, {}, { timeout: 2000 });
+    await page.waitForTimeout(400);
+    var selectedText = await page.locator("#select-overlay").evaluate((el) => el.dataset.selectedText);
+
+    await page.locator("#select-content").tap({ position: { x: 72, y: 24 } });
+    await expect(page.locator("#select-popup")).not.toHaveClass(/hidden/, { timeout: 2000 });
+    await page.locator('[data-select-action="copy"]').tap();
+    await expect(page.locator("#toast")).toHaveClass(/show/, { timeout: 2000 });
+
+    var copiedText = await page.evaluate(() => window.__fallbackCopyText);
+    expect(copiedText).toBe(selectedText);
+
+    await context.close();
+});
+
+test("Settings button controls touch cursor blink", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var context = result.context;
+    var page = result.page;
+
+    await page.goto("/");
+    await waitForTerminalReady(page);
+    await ensureTouchTerminalOutput(page);
+    await page.locator("#terminal .xterm-screen").tap();
+    await page.waitForTimeout(200);
+
+    var labels = await page.locator("#button-scroll .bar-btn").evaluateAll((buttons) => buttons.slice(0, 2).map((button) => button.textContent.trim()));
+    expect(labels).toEqual(["Set", "Ctrl"]);
+    await expect(page.locator("#terminal")).toHaveClass(/touch-cursor-blink/);
+    await expect.poll(async () => {
+        return await page.evaluate(() => {
+            var rows = document.querySelector("#terminal .xterm-rows");
+            var cursor = document.querySelector("#terminal .xterm-cursor");
+            return !!rows && rows.classList.contains("xterm-focus") && !!cursor;
+        });
+    }, { timeout: 2000 }).toBe(true);
+    await expect.poll(async () => {
+        return await page.evaluate(() => {
+            var cursor = document.querySelector("#terminal .xterm-cursor");
+            return cursor ? getComputedStyle(cursor).animationName : "none";
+        });
+    }, { timeout: 2000 }).toBe("touch-cursor-blink");
+
+    await page.locator("#settings-btn").tap();
+    await expect(page.locator("#settings-panel")).not.toHaveClass(/hidden/, { timeout: 2000 });
+    await expect(page.locator("#haptic-feedback-toggle")).toBeChecked();
+    await page.locator("#cursor-blink-toggle").uncheck();
+    await expect(page.locator("#terminal")).not.toHaveClass(/touch-cursor-blink/, { timeout: 2000 });
+
+    await page.reload();
+    await waitForTerminalReady(page);
+    await expect(page.locator("#terminal")).not.toHaveClass(/touch-cursor-blink/, { timeout: 2000 });
+
+    await context.close();
+});
+
+test("Touch keyboard shows popout preview and honors haptic setting", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var context = result.context;
+    var page = result.page;
+
+    await page.addInitScript(WS_INTERCEPT_SCRIPT);
+    await page.addInitScript(() => {
+        window.__vibrations = [];
+        navigator.vibrate = function (pattern) {
+            window.__vibrations.push(pattern);
+            return true;
+        };
+    });
+
+    await page.goto("/");
+    await waitForTerminalReady(page);
+
+    await page.locator("#terminal .xterm-screen").tap();
+    await page.waitForTimeout(200);
+
+    var key = page.locator('[data-touch-key="a"]');
+    await key.dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true, button: 0, buttons: 1 });
+    await expect(page.locator("#touch-key-preview")).not.toHaveClass(/hidden/, { timeout: 2000 });
+    await expect(page.locator("#touch-key-preview")).toHaveText("a");
+    await key.dispatchEvent("pointerup", { pointerType: "touch", isPrimary: true, button: 0, buttons: 0 });
+    await expect(page.locator("#touch-key-preview")).toHaveClass(/hidden/, { timeout: 2000 });
+
+    await page.evaluate(() => {
+        window.__wsSent = [];
+        window.__vibrations = [];
+    });
+
+    await key.tap();
+    await page.waitForTimeout(300);
+
+    var messages = await page.evaluate(() => window.__wsSent);
+    var inputs = getInputs(messages);
+    expect(inputs[inputs.length - 1].data).toBe("a");
+    expect(await page.evaluate(() => window.__vibrations)).toEqual([10]);
+
+    await page.locator("#settings-btn").tap();
+    await expect(page.locator("#settings-panel")).not.toHaveClass(/hidden/, { timeout: 2000 });
+    await page.locator("#haptic-feedback-toggle").uncheck();
+    await page.locator("#settings-close-btn").tap();
+    await expect(page.locator("#settings-panel")).toHaveClass(/hidden/, { timeout: 2000 });
+    await page.locator("#terminal .xterm-screen").tap();
+    await page.waitForTimeout(200);
+
+    await page.evaluate(() => {
+        window.__wsSent = [];
+        window.__vibrations = [];
+    });
+
+    var keyB = page.locator('[data-touch-key="b"]');
+    await keyB.tap();
+    await page.waitForTimeout(300);
+
+    messages = await page.evaluate(() => window.__wsSent);
+    inputs = getInputs(messages);
+    expect(inputs[inputs.length - 1].data).toBe("b");
+    expect(await page.evaluate(() => window.__vibrations)).toEqual([]);
 
     await context.close();
 });

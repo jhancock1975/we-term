@@ -200,13 +200,17 @@ restart_service_if_needed() {
 }
 
 verify_service() {
-    local host port url
+    local host port verify_host url attempt
 
-    host="$(awk -F= '/^Environment=WETERM_HOST=/{print $2}' "$SERVICE_FILE" | tail -n 1 | trim_trailing_whitespace)"
-    port="$(awk -F= '/^Environment=WETERM_PORT=/{print $2}' "$SERVICE_FILE" | tail -n 1 | trim_trailing_whitespace)"
+    host="$(sed -n 's/^Environment=WETERM_HOST=//p' "$SERVICE_FILE" | tail -n 1 | trim_trailing_whitespace | tr -d '"')"
+    port="$(sed -n 's/^Environment=WETERM_PORT=//p' "$SERVICE_FILE" | tail -n 1 | trim_trailing_whitespace | tr -d '"')"
     host="${host:-127.0.0.1}"
     port="${port:-9090}"
-    url="http://${host}:${port}/"
+    verify_host="$host"
+    if [[ "$verify_host" == "0.0.0.0" || "$verify_host" == "::" ]]; then
+        verify_host="127.0.0.1"
+    fi
+    url="http://${verify_host}:${port}/"
 
     require_command curl
 
@@ -214,7 +218,13 @@ verify_service() {
     sudo systemctl is-active --quiet "$SERVICE_NAME" || fail "${SERVICE_NAME} service is not active after deploy."
 
     log "Checking service endpoint at ${url}."
-    curl --fail --silent --show-error --max-time 10 "$url" >/dev/null || fail "Service did not respond successfully at ${url}"
+    for attempt in $(seq 1 15); do
+        if curl --fail --silent --show-error --max-time 5 "$url" >/dev/null; then
+            return
+        fi
+        sleep 1
+    done
+    fail "Service did not respond successfully at ${url}"
 }
 
 persist_deploy_state() {

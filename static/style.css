@@ -25,6 +25,28 @@ html, body {
     width: 100%;
 }
 
+@keyframes touch-cursor-blink {
+    0%, 49% {
+        background-color: #ffffff;
+        box-shadow: none;
+        color: #000000;
+    }
+    50%, 100% {
+        background-color: transparent;
+        box-shadow: inset 0 0 0 1px #ffffff;
+        color: inherit;
+    }
+}
+
+#terminal.touch-cursor-blink .xterm-rows .xterm-cursor.xterm-cursor-block {
+    animation: touch-cursor-blink 1s step-end infinite;
+}
+
+#terminal.touch-cursor-blink .xterm-rows .xterm-cursor.xterm-cursor-block {
+    background-color: #ffffff;
+    color: #000000;
+}
+
 #button-bar {
     background: #2d2d2d;
     border-top: 1px solid #444;
@@ -113,10 +135,18 @@ html, body {
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
+    position: relative;
+    transition: transform 0.08s ease, background 0.08s ease, box-shadow 0.08s ease;
 }
 
 .touch-key:active {
     background: #4a4a4a;
+}
+
+.touch-key.preview-source {
+    transform: translateY(-1px) scale(1.04);
+    background: #454545;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.28);
 }
 
 .touch-key.wide {
@@ -132,6 +162,41 @@ html, body {
     border-color: #60c0ff;
     color: #fff;
     box-shadow: 0 0 8px rgba(0, 122, 204, 0.45), inset 0 0 4px rgba(96, 192, 255, 0.25);
+}
+
+#touch-key-preview {
+    position: fixed;
+    z-index: 260;
+    min-width: 34px;
+    padding: 12px 14px 18px;
+    border-radius: 14px 14px 20px 20px;
+    background: linear-gradient(180deg, #595959 0%, #3c3c3c 100%);
+    border: 1px solid #6f6f6f;
+    color: #ffffff;
+    font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+    font-size: 22px;
+    line-height: 1;
+    text-align: center;
+    box-shadow: 0 16px 28px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    transform-origin: bottom center;
+}
+
+#touch-key-preview::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -8px;
+    width: 18px;
+    height: 18px;
+    background: #3c3c3c;
+    border-right: 1px solid #6f6f6f;
+    border-bottom: 1px solid #6f6f6f;
+    transform: translateX(-50%) rotate(45deg);
+}
+
+#touch-key-preview.hidden {
+    display: none;
 }
 
 #toast {
@@ -154,6 +219,65 @@ html, body {
 
 #toast.show {
     opacity: 1;
+}
+
+#settings-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 220;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.4);
+}
+
+#settings-panel.hidden {
+    display: none;
+}
+
+#settings-sheet {
+    width: min(420px, 100%);
+    background: #202020;
+    border: 1px solid #444;
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+#settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+    color: #d4d4d4;
+}
+
+#settings-close-btn {
+    padding: 8px 14px;
+    background: #007acc;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.settings-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0 4px;
+    color: #d4d4d4;
+    font-size: 15px;
+}
+
+.settings-option input {
+    width: 18px;
+    height: 18px;
 }
 
 #select-overlay {
