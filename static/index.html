@@ -13,10 +13,10 @@
     <div id="terminal"></div>
     <div id="toast"></div>
     <div id="select-overlay" class="hidden">
-        <div id="select-toolbar">
-            <button id="select-done-btn">Done</button>
-        </div>
         <pre id="select-content"></pre>
+        <div id="select-popup" class="hidden">
+            <button type="button" data-select-action="copy">Copy</button>
+        </div>
     </div>
     <div id="paste-overlay" class="hidden">
         <div id="paste-toolbar">
@@ -53,6 +53,7 @@
             <button class="bar-btn" data-key="escape">Esc</button>
         </div>
     </div>
+    <div id="touch-keyboard" class="hidden" aria-hidden="true"></div>
     <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.js"></script>
     <script src="/static/terminal.js"></script>

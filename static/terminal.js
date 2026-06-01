@@ -14,6 +14,13 @@ document.addEventListener("DOMContentLoaded", function () {
     term.loadAddon(fitAddon);
     term.open(document.getElementById("terminal"));
     fitAddon.fit();
+    var termEl = document.getElementById("terminal");
+    var buttonBar = document.getElementById("button-bar");
+    var touchKeyboardEl = document.getElementById("touch-keyboard");
+    var touchKeyboardEnabled = isTouchKeyboardEnabled();
+    var touchKeyboardVisible = false;
+    var shiftActive = false;
+    var symbolMode = false;
 
     // --- WebSocket with auto-reconnect ---
 
@@ -114,28 +121,306 @@ document.addEventListener("DOMContentLoaded", function () {
 
     var selectOverlay = document.getElementById("select-overlay");
     var selectContent = document.getElementById("select-content");
-    var selectDoneBtn = document.getElementById("select-done-btn");
+    var selectPopup = document.getElementById("select-popup");
+    var selectCopyBtn = selectPopup.querySelector('[data-select-action="copy"]');
+    var selectPopupVisible = false;
+    var lastSelectedText = "";
+    var suppressSelectTapUntil = 0;
+    var suppressSelectClickUntil = 0;
+    var suppressSelectionHideUntil = 0;
+    var longPressTimer = null;
+    var longPressTriggered = false;
+    var touchStartX = 0;
+    var touchStartY = 0;
+    var touchMoved = false;
+    var suppressTerminalClickUntil = 0;
 
-    function openSelectMode() {
+    function clearSelection() {
+        var selection = window.getSelection();
+        if (selection) {
+            selection.removeAllRanges();
+        }
+    }
+
+    function syncSelectState() {
+        selectOverlay.dataset.selectedText = lastSelectedText;
+        selectOverlay.dataset.hasSelection = lastSelectedText.trim().length > 0 ? "true" : "false";
+    }
+
+    function hideSelectPopup() {
+        selectPopup.classList.add("hidden");
+        selectPopupVisible = false;
+    }
+
+    function hasActiveSelection() {
+        var selection = window.getSelection();
+        return !!selection && !selection.isCollapsed && selection.toString().trim().length > 0;
+    }
+
+    function getCaretRangeFromPoint(clientX, clientY) {
+        if (document.caretRangeFromPoint) {
+            return document.caretRangeFromPoint(clientX, clientY);
+        }
+        if (document.caretPositionFromPoint) {
+            var position = document.caretPositionFromPoint(clientX, clientY);
+            if (!position) {
+                return null;
+            }
+            var range = document.createRange();
+            range.setStart(position.offsetNode, position.offset);
+            range.collapse(true);
+            return range;
+        }
+        return null;
+    }
+
+    function selectWordAtPoint(clientX, clientY) {
+        var rangeAtPoint = getCaretRangeFromPoint(clientX, clientY);
+        var textNode = selectContent.firstChild;
+        if (!rangeAtPoint || !textNode || textNode.nodeType !== Node.TEXT_NODE) {
+            return false;
+        }
+
+        var text = textNode.textContent || "";
+        if (!text) {
+            return false;
+        }
+
+        var offset = rangeAtPoint.startOffset;
+        if (offset >= text.length) {
+            offset = text.length - 1;
+        }
+
+        while (offset < text.length && /\s/.test(text.charAt(offset))) {
+            offset += 1;
+        }
+        if (offset >= text.length) {
+            offset = rangeAtPoint.startOffset - 1;
+            while (offset >= 0 && /\s/.test(text.charAt(offset))) {
+                offset -= 1;
+            }
+        }
+        if (offset < 0 || offset >= text.length) {
+            return false;
+        }
+
+        var start = offset;
+        var end = offset + 1;
+        while (start > 0 && !/\s/.test(text.charAt(start - 1))) {
+            start -= 1;
+        }
+        while (end < text.length && !/\s/.test(text.charAt(end))) {
+            end += 1;
+        }
+
+        var selectionRange = document.createRange();
+        selectionRange.setStart(textNode, start);
+        selectionRange.setEnd(textNode, end);
+
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(selectionRange);
+        lastSelectedText = selection.toString();
+        syncSelectState();
+        return true;
+    }
+
+    function selectFirstWord() {
+        var textNode = selectContent.firstChild;
+        if (!textNode || textNode.nodeType !== Node.TEXT_NODE) {
+            return false;
+        }
+        var text = textNode.textContent || "";
+        var match = text.match(/\S+/);
+        if (!match) {
+            return false;
+        }
+
+        var start = match.index;
+        var end = start + match[0].length;
+        var selectionRange = document.createRange();
+        selectionRange.setStart(textNode, start);
+        selectionRange.setEnd(textNode, end);
+
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(selectionRange);
+        lastSelectedText = selection.toString();
+        syncSelectState();
+        return true;
+    }
+
+    function legacyCopyText(text) {
+        var textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "readonly");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        document.body.appendChild(textarea);
+        textarea.select();
+        var copied = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        return copied;
+    }
+
+    function writeTextToClipboard(text) {
+        if (!text) {
+            return Promise.resolve(false);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text).then(function () {
+                return true;
+            }, function () {
+                return legacyCopyText(text);
+            });
+        }
+        return Promise.resolve(legacyCopyText(text));
+    }
+
+    function showSelectPopup(clientX, clientY) {
+        if (!hasActiveSelection() && !lastSelectedText.trim()) {
+            hideSelectPopup();
+            return;
+        }
+
+        selectPopup.classList.remove("hidden");
+        selectPopupVisible = true;
+
+        requestAnimationFrame(function () {
+            var popupRect = selectPopup.getBoundingClientRect();
+            var margin = 12;
+            var left = clientX - (popupRect.width / 2);
+            var top = clientY - popupRect.height - 12;
+
+            if (left < margin) {
+                left = margin;
+            }
+            if (left + popupRect.width > window.innerWidth - margin) {
+                left = window.innerWidth - popupRect.width - margin;
+            }
+            if (top < margin) {
+                top = clientY + 12;
+            }
+            if (top + popupRect.height > window.innerHeight - margin) {
+                top = window.innerHeight - popupRect.height - margin;
+            }
+
+            selectPopup.style.left = left + "px";
+            selectPopup.style.top = top + "px";
+        });
+    }
+
+    function handleSelectContentTap(clientX, clientY) {
+        if (selectPopupVisible) {
+            closeSelectMode();
+            return;
+        }
+        if ((window.getSelection().toString() || lastSelectedText).trim().length > 0) {
+            suppressSelectionHideUntil = Date.now() + 300;
+            showSelectPopup(clientX, clientY);
+            return;
+        }
+        closeSelectMode();
+    }
+
+    function openSelectMode(clientX, clientY) {
+        setTouchKeyboardVisible(false);
         var lines = [];
-        var buffer = term.buffer.active;
-        for (var i = 0; i <= buffer.length - 1; i++) {
-            var line = buffer.getLine(i);
-            if (line) {
-                lines.push(line.translateToString(true));
+        var renderedRows = termEl.querySelector(".xterm-rows");
+        if (renderedRows && renderedRows.children.length > 0) {
+            for (var rowIndex = 0; rowIndex < renderedRows.children.length; rowIndex++) {
+                lines.push(renderedRows.children[rowIndex].textContent || "");
+            }
+        }
+
+        if (lines.join("").trim().length === 0) {
+            var buffer = term.buffer.active;
+            for (var i = 0; i <= buffer.length - 1; i++) {
+                var line = buffer.getLine(i);
+                if (line) {
+                    lines.push(line.translateToString(true));
+                }
             }
         }
         selectContent.textContent = lines.join("\n");
         selectOverlay.classList.remove("hidden");
+        hideSelectPopup();
+        clearSelection();
+        lastSelectedText = "";
+        syncSelectState();
+        suppressSelectTapUntil = Date.now() + 350;
+        selectFirstWord();
+
+        if (typeof clientX === "number" && typeof clientY === "number") {
+            requestAnimationFrame(function () {
+                requestAnimationFrame(function () {
+                    if (!selectWordAtPoint(clientX, clientY)) {
+                        selectFirstWord();
+                    }
+                });
+            });
+        }
     }
 
     function closeSelectMode() {
+        hideSelectPopup();
+        clearSelection();
+        lastSelectedText = "";
+        syncSelectState();
         selectOverlay.classList.add("hidden");
         selectContent.textContent = "";
-        term.focus();
+        focusTerminal();
     }
 
-    selectDoneBtn.addEventListener("click", closeSelectMode);
+    selectCopyBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        var selectedText = window.getSelection().toString() || lastSelectedText;
+        writeTextToClipboard(selectedText).then(function (copied) {
+            showToast(copied ? "Copied" : "Copy failed");
+            closeSelectMode();
+        });
+    });
+
+    selectContent.addEventListener("click", function (e) {
+        if (Date.now() < suppressSelectTapUntil) {
+            e.preventDefault();
+            return;
+        }
+        if (Date.now() < suppressSelectClickUntil) {
+            e.preventDefault();
+            return;
+        }
+        e.preventDefault();
+        handleSelectContentTap(e.clientX, e.clientY);
+    });
+
+    selectContent.addEventListener("pointerup", function (e) {
+        if (Date.now() < suppressSelectTapUntil) {
+            e.preventDefault();
+            return;
+        }
+        e.preventDefault();
+        suppressSelectClickUntil = Date.now() + 400;
+        handleSelectContentTap(e.clientX, e.clientY);
+    });
+
+    document.addEventListener("selectionchange", function () {
+        if (selectOverlay.classList.contains("hidden")) {
+            return;
+        }
+        if (selectPopupVisible) {
+            return;
+        }
+        if (Date.now() < suppressSelectionHideUntil) {
+            return;
+        }
+        if (hasActiveSelection()) {
+            lastSelectedText = window.getSelection().toString();
+            syncSelectState();
+        }
+        hideSelectPopup();
+    });
 
     // --- Paste overlay ---
 
@@ -145,6 +430,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var pasteCancelBtn = document.getElementById("paste-cancel-btn");
 
     function openPasteMode() {
+        setTouchKeyboardVisible(false);
         pasteArea.value = "";
         pasteOverlay.classList.remove("hidden");
         pasteArea.focus();
@@ -153,7 +439,7 @@ document.addEventListener("DOMContentLoaded", function () {
     function closePasteMode() {
         pasteOverlay.classList.add("hidden");
         pasteArea.value = "";
-        term.focus();
+        focusTerminal();
     }
 
     // Capture image pastes in the paste area
@@ -224,17 +510,15 @@ document.addEventListener("DOMContentLoaded", function () {
                 } else {
                     showToast("Upload failed");
                 }
-                term.focus();
+                focusTerminal();
             })
             .catch(function () {
                 showToast("Upload failed");
-                term.focus();
+                focusTerminal();
             });
     }
 
     // Handle paste events directly on the terminal (desktop Ctrl+V)
-    var termEl = document.getElementById("terminal");
-
     termEl.addEventListener("paste", function (e) {
         e.preventDefault();
         var items = e.clipboardData.items;
@@ -255,8 +539,6 @@ document.addEventListener("DOMContentLoaded", function () {
     // --- Button bar ---
 
     var modifiers = { ctrl: false, meta: false };
-    var enterBtn = document.getElementById("enter-btn");
-    var buttonBar = document.getElementById("button-bar");
 
     var keyMap = {
         up: "\x1b[A",
@@ -268,6 +550,8 @@ document.addEventListener("DOMContentLoaded", function () {
         enter: "\r",
         tab: "\t",
         escape: "\x1b",
+        backspace: "\x7f",
+        space: " ",
     };
 
     function applyModifiers(seq) {
@@ -292,18 +576,315 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
+    function isTouchKeyboardEnabled() {
+        if (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) {
+            return true;
+        }
+        if (window.matchMedia) {
+            return window.matchMedia("(pointer: coarse)").matches || window.matchMedia("(any-pointer: coarse)").matches;
+        }
+        return "ontouchstart" in window;
+    }
+
+    function focusTerminal() {
+        if (!touchKeyboardEnabled) {
+            term.focus();
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function getTouchKeyboardRows() {
+        if (symbolMode) {
+            return [
+                [
+                    { char: "[" }, { char: "]" }, { char: "{" }, { char: "}" }, { char: "(" }, { char: ")" }, { char: "<" }, { char: ">" }, { char: "=" }, { char: "+" }, { key: "backspace", label: "Bksp", className: "wide" },
+                ],
+                [
+                    { char: "!" }, { char: "@" }, { char: "#" }, { char: "$" }, { char: "%" }, { char: "^" }, { char: "&" }, { char: "*" }, { char: "?" }, { char: "/" },
+                ],
+                [
+                    { char: ":" }, { char: ";" }, { char: "'" }, { char: "\"" }, { char: "`" }, { char: "~" }, { char: "|" }, { char: "\\" }, { char: "_" }, { char: "-" },
+                ],
+                [
+                    { key: "letters", label: "ABC", className: "wide" }, { char: "." }, { char: "," }, { char: "$" }, { char: "*" }, { char: "\"" }, { key: "enter", label: "Enter", className: "wide" },
+                ],
+                [
+                    { key: "escape", label: "Esc" }, { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "hide", label: "Hide", className: "wide" },
+                ],
+            ];
+        }
+        return [
+            [
+                { char: "1", shiftChar: "!" }, { char: "2", shiftChar: "@" }, { char: "3", shiftChar: "#" }, { char: "4", shiftChar: "$" }, { char: "5", shiftChar: "%" }, { char: "6", shiftChar: "^" }, { char: "7", shiftChar: "&" }, { char: "8", shiftChar: "*" }, { char: "9", shiftChar: "(" }, { char: "0", shiftChar: ")" }, { key: "backspace", label: "Bksp", className: "wide" },
+            ],
+            [
+                { char: "q" }, { char: "w" }, { char: "e" }, { char: "r" }, { char: "t" }, { char: "y" }, { char: "u" }, { char: "i" }, { char: "o" }, { char: "p" },
+            ],
+            [
+                { char: "a" }, { char: "s" }, { char: "d" }, { char: "f" }, { char: "g" }, { char: "h" }, { char: "j" }, { char: "k" }, { char: "l" }, { char: "-", shiftChar: "_" },
+            ],
+            [
+                { key: "shift", label: "Shift", className: "wide" }, { char: "z" }, { char: "x" }, { char: "c" }, { char: "v" }, { char: "b" }, { char: "n" }, { char: "m" }, { char: ".", shiftChar: ">" }, { char: "/", shiftChar: "?" }, { key: "enter", label: "Enter", className: "wide" },
+            ],
+            [
+                { key: "symbols", label: "Sym", className: "wide" }, { key: "escape", label: "Esc" }, { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "hide", label: "Hide", className: "wide" },
+            ],
+        ];
+    }
+
+    function getTouchKeyLabel(keyDef) {
+        if (keyDef.key) {
+            return keyDef.label;
+        }
+        if (shiftActive && keyDef.shiftChar) {
+            return keyDef.shiftChar;
+        }
+        if (shiftActive && keyDef.char >= "a" && keyDef.char <= "z") {
+            return keyDef.char.toUpperCase();
+        }
+        return keyDef.char;
+    }
+
+    function getTouchKeyOutput(keyDef) {
+        if (shiftActive && keyDef.shiftChar) {
+            return keyDef.shiftChar;
+        }
+        if (shiftActive && keyDef.char >= "a" && keyDef.char <= "z") {
+            return keyDef.char.toUpperCase();
+        }
+        return keyDef.char;
+    }
+
+    function renderTouchKeyboard() {
+        if (!touchKeyboardEl) {
+            return;
+        }
+        var rows = getTouchKeyboardRows();
+        var html = rows.map(function (row) {
+            var keysHtml = row.map(function (keyDef) {
+                var dataTouchKey = keyDef.key || keyDef.char;
+                var classNames = ["touch-key"];
+                if (keyDef.className) {
+                    classNames.push(keyDef.className);
+                }
+                if (keyDef.key === "shift" && shiftActive) {
+                    classNames.push("active");
+                }
+                if ((keyDef.key === "symbols" && symbolMode) || (keyDef.key === "letters" && !symbolMode)) {
+                    classNames.push("active");
+                }
+                return "<button class=\"" + classNames.join(" ") + "\" data-touch-key=\"" + escapeHtml(dataTouchKey) + "\">" + escapeHtml(getTouchKeyLabel(keyDef)) + "</button>";
+            }).join("");
+            return "<div class=\"touch-keyboard-row\">" + keysHtml + "</div>";
+        }).join("");
+        touchKeyboardEl.innerHTML = html;
+    }
+
+    function setTouchKeyboardVisible(visible) {
+        if (!touchKeyboardEnabled || !touchKeyboardEl) {
+            return;
+        }
+        if (touchKeyboardVisible === visible) {
+            return;
+        }
+        touchKeyboardVisible = visible;
+        touchKeyboardEl.classList.toggle("hidden", !visible);
+        touchKeyboardEl.setAttribute("aria-hidden", visible ? "false" : "true");
+        document.body.classList.toggle("touch-keyboard-visible", visible);
+        if (!visible) {
+            shiftActive = false;
+            symbolMode = false;
+        }
+        renderTouchKeyboard();
+        requestAnimationFrame(doFit);
+    }
+
+    function handleTouchKeyboardAction(keyName) {
+        if (keyName === "shift") {
+            shiftActive = !shiftActive;
+            renderTouchKeyboard();
+            return;
+        }
+        if (keyName === "symbols") {
+            symbolMode = true;
+            shiftActive = false;
+            renderTouchKeyboard();
+            return;
+        }
+        if (keyName === "letters") {
+            symbolMode = false;
+            shiftActive = false;
+            renderTouchKeyboard();
+            return;
+        }
+        if (keyName === "hide") {
+            setTouchKeyboardVisible(false);
+            return;
+        }
+
+        var rows = getTouchKeyboardRows();
+        var keyDef = null;
+        for (var i = 0; i < rows.length && !keyDef; i++) {
+            for (var j = 0; j < rows[i].length; j++) {
+                if ((rows[i][j].key || rows[i][j].char) === keyName) {
+                    keyDef = rows[i][j];
+                    break;
+                }
+            }
+        }
+        if (!keyDef) {
+            return;
+        }
+
+        var seq = keyDef.key ? keyMap[keyDef.key] : getTouchKeyOutput(keyDef);
+        if (seq === undefined) {
+            return;
+        }
+        if (modifiers.ctrl || modifiers.meta) {
+            seq = applyModifiers(seq);
+        }
+        sendInput(seq);
+
+        if (!symbolMode && shiftActive && !keyDef.key) {
+            shiftActive = false;
+            renderTouchKeyboard();
+        }
+    }
+
+    function configureTouchKeyboard() {
+        if (!touchKeyboardEnabled) {
+            return;
+        }
+
+        renderTouchKeyboard();
+
+        var helperTextarea = termEl.querySelector(".xterm-helper-textarea");
+        if (helperTextarea) {
+            helperTextarea.readOnly = true;
+            helperTextarea.setAttribute("readonly", "readonly");
+            helperTextarea.setAttribute("inputmode", "none");
+            helperTextarea.setAttribute("autocapitalize", "off");
+            helperTextarea.setAttribute("autocomplete", "off");
+            helperTextarea.setAttribute("autocorrect", "off");
+            helperTextarea.setAttribute("spellcheck", "false");
+            helperTextarea.addEventListener("focus", function () {
+                helperTextarea.blur();
+                setTouchKeyboardVisible(true);
+            });
+        }
+
+        termEl.addEventListener("touchstart", function (e) {
+            if (selectOverlay.classList.contains("hidden") === false || pasteOverlay.classList.contains("hidden") === false) {
+                return;
+            }
+            if (!e.touches || e.touches.length !== 1) {
+                return;
+            }
+
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            touchMoved = false;
+            longPressTriggered = false;
+
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+            }
+            longPressTimer = setTimeout(function () {
+                longPressTriggered = true;
+                suppressTerminalClickUntil = Date.now() + 500;
+                openSelectMode(touchStartX, touchStartY);
+            }, 450);
+        }, { passive: true, capture: true });
+
+        termEl.addEventListener("touchmove", function (e) {
+            if (!e.touches || e.touches.length !== 1) {
+                return;
+            }
+            var dx = Math.abs(e.touches[0].clientX - touchStartX);
+            var dy = Math.abs(e.touches[0].clientY - touchStartY);
+            if (dx > 10 || dy > 10) {
+                touchMoved = true;
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+            }
+        }, { passive: true, capture: true });
+
+        termEl.addEventListener("click", function (e) {
+            if (Date.now() < suppressTerminalClickUntil) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            setTouchKeyboardVisible(true);
+        }, true);
+
+        termEl.addEventListener("touchend", function (e) {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            if (longPressTriggered) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            if (touchMoved) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            suppressTerminalClickUntil = Date.now() + 300;
+            setTouchKeyboardVisible(true);
+        }, { passive: false, capture: true });
+
+        termEl.addEventListener("touchcancel", function () {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            touchMoved = false;
+            longPressTriggered = false;
+        }, { passive: true, capture: true });
+
+        touchKeyboardEl.addEventListener("click", function (e) {
+            var btn = e.target.closest(".touch-key");
+            if (!btn) {
+                return;
+            }
+            e.preventDefault();
+            handleTouchKeyboardAction(btn.getAttribute("data-touch-key"));
+        });
+    }
+
     function handleBtnAction(btn) {
         var mod = btn.getAttribute("data-modifier");
         if (mod) {
             modifiers[mod] = !modifiers[mod];
             btn.classList.toggle("active", modifiers[mod]);
-            term.focus();
+            if (touchKeyboardEnabled) {
+                setTouchKeyboardVisible(true);
+            } else {
+                focusTerminal();
+            }
             return;
         }
 
         var action = btn.getAttribute("data-action");
         if (action === "select") {
-            openSelectMode();
+            var rect = termEl.getBoundingClientRect();
+            openSelectMode(rect.left + 48, rect.top + 24);
             return;
         }
         if (action === "paste") {
@@ -316,14 +897,14 @@ document.addEventListener("DOMContentLoaded", function () {
             var ch = btn.getAttribute("data-char");
             var seq = applyModifiers(ch);
             sendInput(seq);
-            term.focus();
+            focusTerminal();
             return;
         }
         if (key && keyMap[key] !== undefined) {
             var seq = applyModifiers(keyMap[key]);
             sendInput(seq);
         }
-        term.focus();
+        focusTerminal();
     }
 
     document.querySelectorAll(".bar-btn").forEach(function (btn) {
@@ -349,51 +930,15 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     });
 
-    // --- Keyboard visibility detection + terminal resize ---
+    configureTouchKeyboard();
 
-    var keyboardVisible = false;
+    // --- Terminal resize ---
 
     function updateLayout() {
         if (window.visualViewport) {
-            var vpHeight = window.visualViewport.height;
-            var vpOffsetTop = window.visualViewport.offsetTop;
-            var fullHeight = window.innerHeight;
-            var keyboardNow = fullHeight - vpHeight > 100;
-
-            if (keyboardNow !== keyboardVisible) {
-                keyboardVisible = keyboardNow;
-                enterBtn.style.display = keyboardVisible ? "none" : "";
-            }
-
-            // Scroll the page to top so terminal starts at screen top
             window.scrollTo(0, 0);
-
-            if (keyboardVisible) {
-                // Resize everything to fit within the visual viewport
-                var barHeight = buttonBar.offsetHeight;
-                var availableHeight = vpHeight - barHeight;
-
-                document.body.style.height = vpHeight + "px";
-                termEl.style.height = availableHeight + "px";
-                termEl.style.flex = "none";
-
-                buttonBar.style.position = "";
-                buttonBar.style.bottom = "";
-                buttonBar.style.left = "";
-                buttonBar.style.right = "";
-            } else {
-                document.body.style.height = "";
-                termEl.style.height = "";
-                termEl.style.flex = "";
-
-                buttonBar.style.position = "";
-                buttonBar.style.bottom = "";
-                buttonBar.style.left = "";
-                buttonBar.style.right = "";
-            }
-
-            doFit();
         }
+        doFit();
     }
 
     if (window.visualViewport) {
