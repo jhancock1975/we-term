@@ -77,6 +77,63 @@ html, body {
     font-weight: bold;
 }
 
+#touch-keyboard {
+    background: #161616;
+    border-top: 1px solid #333;
+    padding: 6px 4px calc(8px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+#touch-keyboard.hidden {
+    display: none;
+}
+
+.touch-keyboard-row {
+    display: flex;
+    gap: 4px;
+    justify-content: center;
+}
+
+.touch-key {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 12px 0;
+    background: #2c2c2c;
+    color: #d4d4d4;
+    border: 1px solid #4a4a4a;
+    border-radius: 6px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.touch-key:active {
+    background: #4a4a4a;
+}
+
+.touch-key.wide {
+    flex: 1.35 1 0;
+}
+
+.touch-key.extra-wide {
+    flex: 3 1 0;
+}
+
+.touch-key.active {
+    background: #007acc;
+    border-color: #60c0ff;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(0, 122, 204, 0.45), inset 0 0 4px rgba(96, 192, 255, 0.25);
+}
+
 #toast {
     position: fixed;
     top: 50%;
@@ -103,8 +160,6 @@ html, body {
     position: fixed;
     inset: 0;
     z-index: 200;
-    display: flex;
-    flex-direction: column;
     background: #1e1e1e;
 }
 
@@ -112,35 +167,11 @@ html, body {
     display: none;
 }
 
-#select-toolbar {
-    display: flex;
-    gap: 8px;
-    padding: 10px 12px;
-    background: #2d2d2d;
-    border-bottom: 1px solid #444;
-    flex-shrink: 0;
-}
-
-#select-toolbar button {
-    padding: 8px 16px;
-    background: #007acc;
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    font-size: 14px;
-    cursor: pointer;
-    touch-action: manipulation;
-}
-
-#select-toolbar button {
-    margin-left: auto;
-}
-
 #select-content {
-    flex: 1;
+    height: 100%;
     overflow: auto;
     -webkit-overflow-scrolling: touch;
-    padding: 12px;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
     margin: 0;
     font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
     font-size: 14px;
@@ -150,6 +181,31 @@ html, body {
     word-break: break-all;
     user-select: text;
     -webkit-user-select: text;
+}
+
+#select-popup {
+    position: fixed;
+    z-index: 210;
+    padding: 4px;
+    border-radius: 10px;
+    background: rgba(36, 36, 36, 0.96);
+    border: 1px solid #555;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+#select-popup.hidden {
+    display: none;
+}
+
+#select-popup button {
+    padding: 8px 16px;
+    background: #007acc;
+    color: #fff;
+    border: none;
+    border-radius: 7px;
+    font-size: 14px;
+    cursor: pointer;
+    touch-action: manipulation;
 }
 
 #paste-overlay {
