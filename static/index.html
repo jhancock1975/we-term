@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="pragma" content="no-cache">
+    <meta http-equiv="expires" content="0">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>we-term</title>
@@ -29,10 +32,12 @@
         </div>
     </div>
     <div id="select-overlay" class="hidden">
-        <pre id="select-content"></pre>
-        <div id="select-popup" class="hidden">
-            <button type="button" data-select-action="copy">Copy</button>
+        <div id="select-toolbar">
+            <span id="select-label">Select text, then tap Copy</span>
+            <button id="select-copy-btn" type="button">Copy</button>
+            <button id="select-done-btn" type="button">Done</button>
         </div>
+        <pre id="select-content"></pre>
     </div>
     <div id="paste-overlay" class="hidden">
         <div id="paste-toolbar">
@@ -56,8 +61,6 @@
             <button class="bar-btn" data-key="down">&#9660;</button>
             <button class="bar-btn" data-key="left">&#9664;</button>
             <button class="bar-btn" data-key="right">&#9654;</button>
-            <button class="bar-btn" data-key="enter" id="enter-btn">Enter</button>
-            <button class="bar-btn" data-key="escape">Esc</button>
         </div>
     </div>
     <div id="touch-keyboard" class="hidden" aria-hidden="true"></div>

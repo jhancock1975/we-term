@@ -1,5 +1,6 @@
 import asyncio
 import fcntl
+import hashlib
 import json
 import os
 import pty
@@ -174,8 +175,39 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 
+@web.middleware
+async def no_cache_middleware(request, handler):
+    response = await handler(request)
+    if request.path == "/" or request.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
+def _asset_version(*filenames):
+    """Short content hash of static assets, used to cache-bust their URLs.
+
+    iOS Safari/WebKit (and Chrome on iOS) routinely serve subresources from
+    cache without revalidating, ignoring our no-cache header. Appending a
+    content-derived ?v= to the asset URL guarantees a changed file produces a
+    changed URL the browser cannot serve stale.
+    """
+    digest = hashlib.sha1()
+    for name in filenames:
+        try:
+            with open(os.path.join(STATIC_DIR, name), "rb") as f:
+                digest.update(f.read())
+        except OSError:
+            pass
+    return digest.hexdigest()[:12]
+
+
 async def index_handler(request):
-    return web.FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    with open(os.path.join(STATIC_DIR, "index.html"), "r") as f:
+        html = f.read()
+    version = _asset_version("terminal.js", "style.css")
+    html = html.replace("/static/terminal.js", "/static/terminal.js?v=" + version)
+    html = html.replace("/static/style.css", "/static/style.css?v=" + version)
+    return web.Response(text=html, content_type="text/html")
 
 
 async def upload_handler(request):
@@ -206,7 +238,7 @@ async def upload_handler(request):
     return web.json_response({"path": filepath})
 
 
-app = web.Application()
+app = web.Application(middlewares=[no_cache_middleware])
 app.router.add_get("/ws", websocket_handler)
 app.router.add_get("/", index_handler)
 app.router.add_post("/upload", upload_handler)

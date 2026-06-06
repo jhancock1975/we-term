@@ -203,13 +203,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     var selectOverlay = document.getElementById("select-overlay");
     var selectContent = document.getElementById("select-content");
-    var selectPopup = document.getElementById("select-popup");
-    var selectCopyBtn = selectPopup.querySelector('[data-select-action="copy"]');
-    var selectPopupVisible = false;
+    var selectCopyBtn = document.getElementById("select-copy-btn");
+    var selectDoneBtn = document.getElementById("select-done-btn");
     var lastSelectedText = "";
     var suppressSelectTapUntil = 0;
-    var suppressSelectClickUntil = 0;
-    var suppressSelectionHideUntil = 0;
     var longPressTimer = null;
     var longPressTriggered = false;
     var touchStartX = 0;
@@ -227,11 +224,6 @@ document.addEventListener("DOMContentLoaded", function () {
     function syncSelectState() {
         selectOverlay.dataset.selectedText = lastSelectedText;
         selectOverlay.dataset.hasSelection = lastSelectedText.trim().length > 0 ? "true" : "false";
-    }
-
-    function hideSelectPopup() {
-        selectPopup.classList.add("hidden");
-        selectPopupVisible = false;
     }
 
     function hasActiveSelection() {
@@ -332,6 +324,83 @@ document.addEventListener("DOMContentLoaded", function () {
         return true;
     }
 
+    function getTerminalCharOffset(clientX, clientY, lines) {
+        var renderedRows = termEl.querySelector(".xterm-rows");
+        if (!renderedRows || renderedRows.children.length === 0) {
+            return -1;
+        }
+        var rowIndex = -1;
+        for (var i = 0; i < renderedRows.children.length; i++) {
+            var rect = renderedRows.children[i].getBoundingClientRect();
+            if (clientY >= rect.top && clientY <= rect.bottom) {
+                rowIndex = i;
+                break;
+            }
+        }
+        if (rowIndex === -1) {
+            return -1;
+        }
+        var rowRect = renderedRows.children[rowIndex].getBoundingClientRect();
+        var cellWidth = rowRect.width / term.cols;
+        var col = Math.floor((clientX - rowRect.left) / cellWidth);
+        col = Math.max(0, col);
+        var offset = 0;
+        for (var i = 0; i < rowIndex && i < lines.length; i++) {
+            offset += lines[i].length + 1;
+        }
+        if (rowIndex < lines.length) {
+            offset += Math.min(col, lines[rowIndex].length);
+        }
+        return offset;
+    }
+
+    function selectWordAtOffset(offset) {
+        var textNode = selectContent.firstChild;
+        if (!textNode || textNode.nodeType !== Node.TEXT_NODE) {
+            return false;
+        }
+        var text = textNode.textContent || "";
+        if (!text || offset < 0 || offset >= text.length) {
+            return false;
+        }
+        if (/\s/.test(text.charAt(offset))) {
+            var fwd = offset;
+            while (fwd < text.length && /\s/.test(text.charAt(fwd))) {
+                fwd++;
+            }
+            if (fwd < text.length) {
+                offset = fwd;
+            } else {
+                var bwd = offset;
+                while (bwd >= 0 && /\s/.test(text.charAt(bwd))) {
+                    bwd--;
+                }
+                if (bwd >= 0) {
+                    offset = bwd;
+                } else {
+                    return false;
+                }
+            }
+        }
+        var start = offset;
+        var end = offset + 1;
+        while (start > 0 && !/\s/.test(text.charAt(start - 1))) {
+            start--;
+        }
+        while (end < text.length && !/\s/.test(text.charAt(end))) {
+            end++;
+        }
+        var selectionRange = document.createRange();
+        selectionRange.setStart(textNode, start);
+        selectionRange.setEnd(textNode, end);
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(selectionRange);
+        lastSelectedText = selection.toString();
+        syncSelectState();
+        return true;
+    }
+
     function legacyCopyText(text) {
         var activeElement = document.activeElement;
         var textarea = document.createElement("textarea");
@@ -380,52 +449,6 @@ document.addEventListener("DOMContentLoaded", function () {
         return Promise.resolve(legacyCopyText(text));
     }
 
-    function showSelectPopup(clientX, clientY) {
-        if (!hasActiveSelection() && !lastSelectedText.trim()) {
-            hideSelectPopup();
-            return;
-        }
-
-        selectPopup.classList.remove("hidden");
-        selectPopupVisible = true;
-
-        requestAnimationFrame(function () {
-            var popupRect = selectPopup.getBoundingClientRect();
-            var margin = 12;
-            var left = clientX - (popupRect.width / 2);
-            var top = clientY - popupRect.height - 12;
-
-            if (left < margin) {
-                left = margin;
-            }
-            if (left + popupRect.width > window.innerWidth - margin) {
-                left = window.innerWidth - popupRect.width - margin;
-            }
-            if (top < margin) {
-                top = clientY + 12;
-            }
-            if (top + popupRect.height > window.innerHeight - margin) {
-                top = window.innerHeight - popupRect.height - margin;
-            }
-
-            selectPopup.style.left = left + "px";
-            selectPopup.style.top = top + "px";
-        });
-    }
-
-    function handleSelectContentTap(clientX, clientY) {
-        if (selectPopupVisible) {
-            closeSelectMode();
-            return;
-        }
-        if ((window.getSelection().toString() || lastSelectedText).trim().length > 0) {
-            suppressSelectionHideUntil = Date.now() + 300;
-            showSelectPopup(clientX, clientY);
-            return;
-        }
-        closeSelectMode();
-    }
-
     function openSelectMode(clientX, clientY) {
         setTouchKeyboardVisible(false);
         closeSettingsPanel(true);
@@ -446,28 +469,37 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             }
         }
+
+        var charOffset = -1;
+        if (typeof clientX === "number" && typeof clientY === "number") {
+            charOffset = getTerminalCharOffset(clientX, clientY, lines);
+        }
+
         selectContent.textContent = lines.join("\n");
         selectOverlay.classList.remove("hidden");
-        hideSelectPopup();
         clearSelection();
         lastSelectedText = "";
         syncSelectState();
         suppressSelectTapUntil = Date.now() + 350;
-        selectFirstWord();
 
-        if (typeof clientX === "number" && typeof clientY === "number") {
-            requestAnimationFrame(function () {
-                requestAnimationFrame(function () {
-                    if (!selectWordAtPoint(clientX, clientY)) {
-                        selectFirstWord();
-                    }
-                });
-            });
+        if (charOffset < 0 || !selectWordAtOffset(charOffset)) {
+            selectFirstWord();
         }
+
+        requestAnimationFrame(function () {
+            var sel = window.getSelection();
+            if (sel.rangeCount > 0) {
+                var range = sel.getRangeAt(0);
+                var rect = range.getBoundingClientRect();
+                var containerRect = selectContent.getBoundingClientRect();
+                if (rect.top < containerRect.top || rect.bottom > containerRect.bottom) {
+                    selectContent.scrollTop += rect.top - containerRect.top - containerRect.height / 3;
+                }
+            }
+        });
     }
 
     function closeSelectMode() {
-        hideSelectPopup();
         clearSelection();
         lastSelectedText = "";
         syncSelectState();
@@ -476,53 +508,48 @@ document.addEventListener("DOMContentLoaded", function () {
         focusTerminal();
     }
 
-    selectCopyBtn.addEventListener("click", function (e) {
-        e.preventDefault();
+    function doCopy() {
         var selectedText = window.getSelection().toString() || lastSelectedText;
         writeTextToClipboard(selectedText).then(function (copied) {
             showToast(copied ? "Copied" : "Copy failed");
             closeSelectMode();
         });
-    });
+    }
 
-    selectContent.addEventListener("click", function (e) {
-        if (Date.now() < suppressSelectTapUntil) {
+    if (selectCopyBtn) {
+        selectCopyBtn.addEventListener("click", function (e) {
             e.preventDefault();
-            return;
-        }
-        if (Date.now() < suppressSelectClickUntil) {
-            e.preventDefault();
-            return;
-        }
-        e.preventDefault();
-        handleSelectContentTap(e.clientX, e.clientY);
-    });
+            doCopy();
+        });
 
-    selectContent.addEventListener("pointerup", function (e) {
-        if (Date.now() < suppressSelectTapUntil) {
+        selectCopyBtn.addEventListener("touchstart", function (e) { e.preventDefault(); });
+        selectCopyBtn.addEventListener("touchend", function (e) {
             e.preventDefault();
-            return;
-        }
-        e.preventDefault();
-        suppressSelectClickUntil = Date.now() + 400;
-        handleSelectContentTap(e.clientX, e.clientY);
-    });
+            doCopy();
+        });
+    }
+
+    if (selectDoneBtn) {
+        selectDoneBtn.addEventListener("click", function (e) {
+            e.preventDefault();
+            closeSelectMode();
+        });
+
+        selectDoneBtn.addEventListener("touchstart", function (e) { e.preventDefault(); });
+        selectDoneBtn.addEventListener("touchend", function (e) {
+            e.preventDefault();
+            closeSelectMode();
+        });
+    }
 
     document.addEventListener("selectionchange", function () {
         if (selectOverlay.classList.contains("hidden")) {
-            return;
-        }
-        if (selectPopupVisible) {
-            return;
-        }
-        if (Date.now() < suppressSelectionHideUntil) {
             return;
         }
         if (hasActiveSelection()) {
             lastSelectedText = window.getSelection().toString();
             syncSelectState();
         }
-        hideSelectPopup();
     });
 
     // --- Paste overlay ---
@@ -691,10 +718,10 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function focusTerminal() {
-        term.focus();
-        if (touchKeyboardEnabled && navigator.virtualKeyboard && navigator.virtualKeyboard.hide) {
-            navigator.virtualKeyboard.hide();
+        if (touchKeyboardEnabled) {
+            return;
         }
+        term.focus();
     }
 
     function triggerHapticFeedback() {
@@ -719,7 +746,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (symbolMode) {
             return [
                 [
-                    { char: "[" }, { char: "]" }, { char: "{" }, { char: "}" }, { char: "(" }, { char: ")" }, { char: "<" }, { char: ">" }, { char: "=" }, { char: "+" }, { key: "backspace", label: "Bksp", className: "wide" },
+                    { key: "escape", label: "Esc" }, { char: "[" }, { char: "]" }, { char: "{" }, { char: "}" }, { char: "(" }, { char: ")" }, { char: "<" }, { char: ">" }, { char: "=" }, { char: "+" },
                 ],
                 [
                     { char: "!" }, { char: "@" }, { char: "#" }, { char: "$" }, { char: "%" }, { char: "^" }, { char: "&" }, { char: "*" }, { char: "?" }, { char: "/" },
@@ -728,16 +755,16 @@ document.addEventListener("DOMContentLoaded", function () {
                     { char: ":" }, { char: ";" }, { char: "'" }, { char: "\"" }, { char: "`" }, { char: "~" }, { char: "|" }, { char: "\\" }, { char: "_" }, { char: "-" },
                 ],
                 [
-                    { key: "letters", label: "ABC", className: "wide" }, { char: "." }, { char: "," }, { char: "$" }, { char: "*" }, { char: "\"" }, { key: "enter", label: "Enter", className: "wide" },
+                    { key: "letters", label: "ABC", className: "wide" }, { char: "." }, { char: "," }, { char: "$" }, { char: "*" }, { char: "\"" }, { key: "backspace", label: "Bksp", className: "wide" },
                 ],
                 [
-                    { key: "escape", label: "Esc" }, { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "hide", label: "Hide", className: "wide" },
+                    { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
                 ],
             ];
         }
         return [
             [
-                { char: "1", shiftChar: "!" }, { char: "2", shiftChar: "@" }, { char: "3", shiftChar: "#" }, { char: "4", shiftChar: "$" }, { char: "5", shiftChar: "%" }, { char: "6", shiftChar: "^" }, { char: "7", shiftChar: "&" }, { char: "8", shiftChar: "*" }, { char: "9", shiftChar: "(" }, { char: "0", shiftChar: ")" }, { key: "backspace", label: "Bksp", className: "wide" },
+                { key: "escape", label: "Esc" }, { char: "1", shiftChar: "!" }, { char: "2", shiftChar: "@" }, { char: "3", shiftChar: "#" }, { char: "4", shiftChar: "$" }, { char: "5", shiftChar: "%" }, { char: "6", shiftChar: "^" }, { char: "7", shiftChar: "&" }, { char: "8", shiftChar: "*" }, { char: "9", shiftChar: "(" }, { char: "0", shiftChar: ")" },
             ],
             [
                 { char: "q" }, { char: "w" }, { char: "e" }, { char: "r" }, { char: "t" }, { char: "y" }, { char: "u" }, { char: "i" }, { char: "o" }, { char: "p" },
@@ -746,10 +773,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 { char: "a" }, { char: "s" }, { char: "d" }, { char: "f" }, { char: "g" }, { char: "h" }, { char: "j" }, { char: "k" }, { char: "l" }, { char: "-", shiftChar: "_" },
             ],
             [
-                { key: "shift", label: "Shift", className: "wide" }, { char: "z" }, { char: "x" }, { char: "c" }, { char: "v" }, { char: "b" }, { char: "n" }, { char: "m" }, { char: ".", shiftChar: ">" }, { char: "/", shiftChar: "?" }, { key: "enter", label: "Enter", className: "wide" },
+                { key: "shift", label: "Shift", className: "wide" }, { char: "z" }, { char: "x" }, { char: "c" }, { char: "v" }, { char: "b" }, { char: "n" }, { char: "m" }, { char: ".", shiftChar: ">" }, { char: "/", shiftChar: "?" }, { key: "backspace", label: "Bksp", className: "wide" },
             ],
             [
-                { key: "symbols", label: "Sym", className: "wide" }, { key: "escape", label: "Esc" }, { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "hide", label: "Hide", className: "wide" },
+                { key: "symbols", label: "Sym", className: "wide" }, { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
             ],
         ];
     }
@@ -882,12 +909,6 @@ document.addEventListener("DOMContentLoaded", function () {
             renderTouchKeyboard();
             return;
         }
-        if (keyName === "hide") {
-            triggerHapticFeedback();
-            setTouchKeyboardVisible(false);
-            return;
-        }
-
         var rows = getTouchKeyboardRows();
         var keyDef = null;
         for (var i = 0; i < rows.length && !keyDef; i++) {
@@ -927,21 +948,59 @@ document.addEventListener("DOMContentLoaded", function () {
 
         var helperTextarea = termEl.querySelector(".xterm-helper-textarea");
         if (helperTextarea) {
-            helperTextarea.readOnly = true;
-            helperTextarea.setAttribute("readonly", "readonly");
+            // Prevent the iOS system keyboard from appearing.
+            // inputmode="none" tells iOS 16.4+ not to show the virtual keyboard.
             helperTextarea.setAttribute("inputmode", "none");
             helperTextarea.setAttribute("virtualkeyboardpolicy", "manual");
             helperTextarea.setAttribute("autocapitalize", "off");
             helperTextarea.setAttribute("autocomplete", "off");
             helperTextarea.setAttribute("autocorrect", "off");
             helperTextarea.setAttribute("spellcheck", "false");
+            helperTextarea.setAttribute("tabindex", "-1");
+            helperTextarea.readOnly = true;
+            helperTextarea.setAttribute("readonly", "readonly");
+            helperTextarea.disabled = true;
+            helperTextarea.style.pointerEvents = "none";
+
+            // Move the textarea off-screen so it can never be the direct
+            // target of a touch event, while keeping it in the DOM for
+            // xterm's internal event handling.
+            helperTextarea.style.position = "fixed";
+            helperTextarea.style.left = "-9999px";
+            helperTextarea.style.top = "-9999px";
+            helperTextarea.style.opacity = "0";
+
+            // Override .focus() so no code (including xterm.js internals)
+            // can focus the textarea and trigger the system keyboard.
+            Object.defineProperty(helperTextarea, "focus", {
+                value: function () {},
+                writable: false,
+                configurable: false,
+            });
+
+            // Safety net: if focus somehow lands on the textarea, blur
+            // it immediately so the system keyboard never appears.
             helperTextarea.addEventListener("focus", function () {
-                if (navigator.virtualKeyboard && navigator.virtualKeyboard.hide) {
-                    navigator.virtualKeyboard.hide();
+                helperTextarea.blur();
+            }, true);
+
+            // Re-apply inputmode if xterm.js resets it (e.g. during fit
+            // or when the terminal is re-opened).
+            var textareaObserver = new MutationObserver(function () {
+                if (helperTextarea.getAttribute("inputmode") !== "none") {
+                    helperTextarea.setAttribute("inputmode", "none");
                 }
-                setTouchKeyboardVisible(true);
+            });
+            textareaObserver.observe(helperTextarea, {
+                attributes: true,
+                attributeFilter: ["inputmode"],
             });
         }
+
+        // Override term.focus() so xterm never tries to focus the
+        // helper textarea on touch devices. The custom keyboard sends
+        // input directly via sendInput(), so xterm focus is not needed.
+        term.focus = function () {};
 
         termEl.addEventListener("touchstart", function (e) {
             if (selectOverlay.classList.contains("hidden") === false || pasteOverlay.classList.contains("hidden") === false) {
@@ -989,7 +1048,7 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             e.preventDefault();
             e.stopPropagation();
-            setTouchKeyboardVisible(true);
+            setTouchKeyboardVisible(!touchKeyboardVisible);
             focusTerminal();
         }, true);
 
@@ -1009,7 +1068,7 @@ document.addEventListener("DOMContentLoaded", function () {
             e.preventDefault();
             e.stopPropagation();
             suppressTerminalClickUntil = Date.now() + 300;
-            setTouchKeyboardVisible(true);
+            setTouchKeyboardVisible(!touchKeyboardVisible);
             focusTerminal();
         }, { passive: false, capture: true });
 

@@ -23,6 +23,7 @@ SYSTEMD_RELOADED=0
 SERVICE_WAS_INACTIVE=0
 CURRENT_PACKAGE_HASH=""
 CURRENT_REQUIREMENTS_HASH=""
+ARTIFACT_PATH=""
 
 log() {
     printf '==> %s\n' "$1" >&2
@@ -97,11 +98,11 @@ run_optional_build() {
 }
 
 package_application() {
-    local timestamp artifact_path current_hash previous_hash
+    local timestamp current_hash previous_hash
 
     mkdir -p "$DIST_DIR"
     timestamp="$(date +%Y%m%d-%H%M%S)"
-    artifact_path="$DIST_DIR/${APP_NAME}-${timestamp}.tar.gz"
+    ARTIFACT_PATH="$DIST_DIR/${APP_NAME}-${timestamp}.tar.gz"
 
     log "Packaging application snapshot."
     tar \
@@ -113,20 +114,18 @@ package_application() {
         --exclude='playwright-report' \
         --exclude='__pycache__' \
         --exclude='.pytest_cache' \
-        -czf "$artifact_path" \
+        -czf "$ARTIFACT_PATH" \
         -C "$SCRIPT_DIR" .
 
-    ln -sfn "$(basename "$artifact_path")" "$LATEST_ARTIFACT_LINK"
+    ln -sfn "$(basename "$ARTIFACT_PATH")" "$LATEST_ARTIFACT_LINK"
 
-    current_hash="$(compute_file_hash "$artifact_path")"
+    current_hash="$(compute_file_hash "$ARTIFACT_PATH")"
     previous_hash="$(read_saved_hash "$LAST_PACKAGE_HASH_FILE")"
     CURRENT_PACKAGE_HASH="$current_hash"
 
     if [[ "$current_hash" != "$previous_hash" ]]; then
         APP_CHANGED=1
     fi
-
-    printf '%s\n' "$artifact_path"
 }
 
 ensure_virtualenv() {
@@ -217,9 +216,10 @@ verify_service() {
     log "Verifying ${SERVICE_NAME} service is active."
     sudo systemctl is-active --quiet "$SERVICE_NAME" || fail "${SERVICE_NAME} service is not active after deploy."
 
-    log "Checking service endpoint at ${url}."
+    log "Waiting for service endpoint at ${url}."
     for attempt in $(seq 1 15); do
-        if curl --fail --silent --show-error --max-time 5 "$url" >/dev/null; then
+        if curl --fail --silent --max-time 5 "$url" >/dev/null 2>&1; then
+            log "Service is responding."
             return
         fi
         sleep 1
@@ -238,24 +238,22 @@ persist_deploy_state() {
 }
 
 main() {
-    local artifact_path
-
     require_command tar
     require_command sha256sum
 
     mkdir -p "$DEPLOY_STATE_DIR" "$DIST_DIR"
 
     run_optional_build
-    artifact_path="$(package_application)"
+    package_application
     ensure_virtualenv
     install_python_dependencies
     update_systemd_service
     restart_service_if_needed
-    verify_service
     persist_deploy_state
+    verify_service
 
     log "Deploy complete."
-    printf 'Artifact: %s\n' "$artifact_path"
+    printf 'Artifact: %s\n' "$ARTIFACT_PATH"
     if [[ "$SYSTEMD_RELOADED" -eq 1 ]]; then
         printf 'Systemd: reloaded\n'
     fi
