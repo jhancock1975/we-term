@@ -9,6 +9,7 @@ WorkingDirectory=/home/john/git/we-term
 ExecStart=/home/john/git/we-term/venv/bin/python /home/john/git/we-term/server.py
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=5
 Environment=WETERM_HOST=0.0.0.0
 Environment=WETERM_PORT=9090
 

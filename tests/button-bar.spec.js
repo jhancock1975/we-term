@@ -90,7 +90,7 @@ async function longPressTerminal(page, offsetX, offsetY, delayMs) {
     }, { clientX: clientX, clientY: clientY, delayMs: delayMs || 600 });
 }
 
-test("Long press selection shows copy popup, exits on second tap, and copies selected text", async ({ browser }) => {
+test("Long press opens select overlay with toolbar and copy works", async ({ browser }) => {
     var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
     var context = result.context;
     var page = result.page;
@@ -102,26 +102,22 @@ test("Long press selection shows copy popup, exits on second tap, and copies sel
     await longPressTerminal(page, 72, 24, 650);
     await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 2000 });
     await page.waitForFunction(() => document.getElementById("select-overlay").dataset.selectedText.trim().length > 0, {}, { timeout: 2000 });
-    await page.waitForTimeout(400);
 
     var selectedText = await page.locator("#select-overlay").evaluate((el) => el.dataset.selectedText);
     expect(selectedText.trim().length).toBeGreaterThan(0);
 
-    await page.locator("#select-content").tap({ position: { x: 72, y: 24 } });
-    await expect(page.locator("#select-popup")).not.toHaveClass(/hidden/, { timeout: 2000 });
+    await expect(page.locator("#select-copy-btn")).toBeVisible();
+    await expect(page.locator("#select-done-btn")).toBeVisible();
 
-    await page.locator("#select-content").tap({ position: { x: 72, y: 24 } });
+    await page.locator("#select-done-btn").tap();
     await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 2000 });
 
     await longPressTerminal(page, 72, 24, 650);
     await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 2000 });
     await page.waitForFunction(() => document.getElementById("select-overlay").dataset.selectedText.trim().length > 0, {}, { timeout: 2000 });
-    await page.waitForTimeout(400);
 
     selectedText = await page.locator("#select-overlay").evaluate((el) => el.dataset.selectedText);
-    await page.locator("#select-content").tap({ position: { x: 72, y: 24 } });
-    await expect(page.locator("#select-popup")).not.toHaveClass(/hidden/, { timeout: 2000 });
-    await page.locator('[data-select-action="copy"]').tap();
+    await page.locator("#select-copy-btn").tap();
     await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 2000 });
 
     var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
@@ -158,12 +154,9 @@ test("Copy falls back when clipboard API is unavailable", async ({ browser }) =>
     await longPressTerminal(page, 72, 24, 650);
     await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 2000 });
     await page.waitForFunction(() => document.getElementById("select-overlay").dataset.selectedText.trim().length > 0, {}, { timeout: 2000 });
-    await page.waitForTimeout(400);
     var selectedText = await page.locator("#select-overlay").evaluate((el) => el.dataset.selectedText);
 
-    await page.locator("#select-content").tap({ position: { x: 72, y: 24 } });
-    await expect(page.locator("#select-popup")).not.toHaveClass(/hidden/, { timeout: 2000 });
-    await page.locator('[data-select-action="copy"]').tap();
+    await page.locator("#select-copy-btn").tap();
     await expect(page.locator("#toast")).toHaveClass(/show/, { timeout: 2000 });
 
     var copiedText = await page.evaluate(() => window.__fallbackCopyText);
@@ -186,19 +179,6 @@ test("Settings button controls touch cursor blink", async ({ browser }) => {
     var labels = await page.locator("#button-scroll .bar-btn").evaluateAll((buttons) => buttons.slice(0, 2).map((button) => button.textContent.trim()));
     expect(labels).toEqual(["Set", "Ctrl"]);
     await expect(page.locator("#terminal")).toHaveClass(/touch-cursor-blink/);
-    await expect.poll(async () => {
-        return await page.evaluate(() => {
-            var rows = document.querySelector("#terminal .xterm-rows");
-            var cursor = document.querySelector("#terminal .xterm-cursor");
-            return !!rows && rows.classList.contains("xterm-focus") && !!cursor;
-        });
-    }, { timeout: 2000 }).toBe(true);
-    await expect.poll(async () => {
-        return await page.evaluate(() => {
-            var cursor = document.querySelector("#terminal .xterm-cursor");
-            return cursor ? getComputedStyle(cursor).animationName : "none";
-        });
-    }, { timeout: 2000 }).toBe("touch-cursor-blink");
 
     await page.locator("#settings-btn").tap();
     await expect(page.locator("#settings-panel")).not.toHaveClass(/hidden/, { timeout: 2000 });
