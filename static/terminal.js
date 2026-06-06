@@ -746,7 +746,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (symbolMode) {
             return [
                 [
-                    { char: "[" }, { char: "]" }, { char: "{" }, { char: "}" }, { char: "(" }, { char: ")" }, { char: "<" }, { char: ">" }, { char: "=" }, { char: "+" }, { key: "backspace", label: "Bksp", className: "wide" },
+                    { key: "escape", label: "Esc" }, { char: "[" }, { char: "]" }, { char: "{" }, { char: "}" }, { char: "(" }, { char: ")" }, { char: "<" }, { char: ">" }, { char: "=" }, { char: "+" },
                 ],
                 [
                     { char: "!" }, { char: "@" }, { char: "#" }, { char: "$" }, { char: "%" }, { char: "^" }, { char: "&" }, { char: "*" }, { char: "?" }, { char: "/" },
@@ -755,16 +755,16 @@ document.addEventListener("DOMContentLoaded", function () {
                     { char: ":" }, { char: ";" }, { char: "'" }, { char: "\"" }, { char: "`" }, { char: "~" }, { char: "|" }, { char: "\\" }, { char: "_" }, { char: "-" },
                 ],
                 [
-                    { key: "letters", label: "ABC", className: "wide" }, { char: "." }, { char: "," }, { char: "$" }, { char: "*" }, { char: "\"" }, { key: "enter", label: "Enter", className: "wide" },
+                    { key: "letters", label: "ABC", className: "wide" }, { char: "." }, { char: "," }, { char: "$" }, { char: "*" }, { char: "\"" }, { key: "backspace", label: "Bksp", className: "wide" },
                 ],
                 [
-                    { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "hide", label: "Hide", className: "wide" },
+                    { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
                 ],
             ];
         }
         return [
             [
-                { char: "1", shiftChar: "!" }, { char: "2", shiftChar: "@" }, { char: "3", shiftChar: "#" }, { char: "4", shiftChar: "$" }, { char: "5", shiftChar: "%" }, { char: "6", shiftChar: "^" }, { char: "7", shiftChar: "&" }, { char: "8", shiftChar: "*" }, { char: "9", shiftChar: "(" }, { char: "0", shiftChar: ")" }, { key: "backspace", label: "Bksp", className: "wide" },
+                { key: "escape", label: "Esc" }, { char: "1", shiftChar: "!" }, { char: "2", shiftChar: "@" }, { char: "3", shiftChar: "#" }, { char: "4", shiftChar: "$" }, { char: "5", shiftChar: "%" }, { char: "6", shiftChar: "^" }, { char: "7", shiftChar: "&" }, { char: "8", shiftChar: "*" }, { char: "9", shiftChar: "(" }, { char: "0", shiftChar: ")" },
             ],
             [
                 { char: "q" }, { char: "w" }, { char: "e" }, { char: "r" }, { char: "t" }, { char: "y" }, { char: "u" }, { char: "i" }, { char: "o" }, { char: "p" },
@@ -773,10 +773,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 { char: "a" }, { char: "s" }, { char: "d" }, { char: "f" }, { char: "g" }, { char: "h" }, { char: "j" }, { char: "k" }, { char: "l" }, { char: "-", shiftChar: "_" },
             ],
             [
-                { key: "shift", label: "Shift", className: "wide" }, { char: "z" }, { char: "x" }, { char: "c" }, { char: "v" }, { char: "b" }, { char: "n" }, { char: "m" }, { char: ".", shiftChar: ">" }, { char: "/", shiftChar: "?" }, { key: "enter", label: "Enter", className: "wide" },
+                { key: "shift", label: "Shift", className: "wide" }, { char: "z" }, { char: "x" }, { char: "c" }, { char: "v" }, { char: "b" }, { char: "n" }, { char: "m" }, { char: ".", shiftChar: ">" }, { char: "/", shiftChar: "?" }, { key: "backspace", label: "Bksp", className: "wide" },
             ],
             [
-                { key: "symbols", label: "Sym", className: "wide" }, { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "hide", label: "Hide", className: "wide" },
+                { key: "symbols", label: "Sym", className: "wide" }, { key: "tab", label: "Tab" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
             ],
         ];
     }
@@ -909,12 +909,6 @@ document.addEventListener("DOMContentLoaded", function () {
             renderTouchKeyboard();
             return;
         }
-        if (keyName === "hide") {
-            triggerHapticFeedback();
-            setTouchKeyboardVisible(false);
-            return;
-        }
-
         var rows = getTouchKeyboardRows();
         var keyDef = null;
         for (var i = 0; i < rows.length && !keyDef; i++) {
@@ -1054,7 +1048,7 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             e.preventDefault();
             e.stopPropagation();
-            setTouchKeyboardVisible(true);
+            setTouchKeyboardVisible(!touchKeyboardVisible);
             focusTerminal();
         }, true);
 
@@ -1074,7 +1068,7 @@ document.addEventListener("DOMContentLoaded", function () {
             e.preventDefault();
             e.stopPropagation();
             suppressTerminalClickUntil = Date.now() + 300;
-            setTouchKeyboardVisible(true);
+            setTouchKeyboardVisible(!touchKeyboardVisible);
             focusTerminal();
         }, { passive: false, capture: true });
 

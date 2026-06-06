@@ -168,7 +168,7 @@ test("Non-touch device: custom keyboard stays hidden", async ({ page }) => {
     await expect(page.locator("#touch-keyboard")).toHaveClass(/hidden/);
 });
 
-test("Touch device: custom keyboard has no duplicate Esc key", async ({ browser }) => {
+test("Touch device: Esc lives on the keyboard left of 1, not the button bar", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var context = result.context;
     var page = result.page;
@@ -180,11 +180,20 @@ test("Touch device: custom keyboard has no duplicate Esc key", async ({ browser 
     await page.locator("#terminal .xterm-screen").tap();
     await page.waitForTimeout(500);
 
-    var escKeys = await page.locator('#touch-keyboard [data-touch-key="escape"]').count();
-    expect(escKeys).toBe(0);
-
+    // Esc was removed from the button bar.
     var barEsc = await page.locator('#button-bar [data-key="escape"]').count();
-    expect(barEsc).toBe(1);
+    expect(barEsc).toBe(0);
+
+    // Esc is on the keyboard, immediately left of the "1" key.
+    var positions = await page.evaluate(() => {
+        var keys = Array.from(document.querySelectorAll('#touch-keyboard .touch-key'));
+        return {
+            escIdx: keys.findIndex((k) => k.getAttribute("data-touch-key") === "escape"),
+            oneIdx: keys.findIndex((k) => k.getAttribute("data-touch-key") === "1"),
+        };
+    });
+    expect(positions.escIdx).toBeGreaterThanOrEqual(0);
+    expect(positions.oneIdx).toBe(positions.escIdx + 1);
 
     await context.close();
 });

@@ -340,7 +340,8 @@ test("Touch tap on terminal opens JS keyboard and sends typed input", async ({ b
     console.log("Touch keyboard inputs:", JSON.stringify(inputs));
     expect(inputs.slice(-3).map((input) => input.data)).toEqual(["a", "b", "\r"]);
 
-    await page.locator('[data-touch-key="hide"]').tap();
+    // Single tap on the terminal toggles the keyboard closed (no Hide key).
+    await page.locator("#terminal .xterm-screen").tap();
     await expect(page.locator("#touch-keyboard")).toHaveClass(/hidden/, { timeout: 2000 });
 
     await context.close();
