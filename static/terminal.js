@@ -52,6 +52,9 @@ document.addEventListener("DOMContentLoaded", function () {
     var hapticFeedbackToggle = document.getElementById("haptic-feedback-toggle");
     var systemKeyboardToggle = document.getElementById("system-keyboard-toggle");
     var keyboardGearEl = document.getElementById("keyboard-gear");
+    var helpOverlay = document.getElementById("help-overlay");
+    var helpBtn = document.getElementById("help-btn");
+    var helpCloseBtn = document.getElementById("help-close-btn");
     var buttonBar = document.getElementById("button-bar");
     var touchKeyboardEl = document.getElementById("touch-keyboard");
     var touchKeyPreviewEl = document.getElementById("touch-key-preview");
@@ -82,6 +85,9 @@ document.addEventListener("DOMContentLoaded", function () {
             return true;
         }
         if (settingsPanel && !settingsPanel.classList.contains("hidden")) {
+            return true;
+        }
+        if (helpOverlay && !helpOverlay.classList.contains("hidden")) {
             return true;
         }
         var xtermEl = termEl.querySelector(".xterm");
@@ -310,6 +316,31 @@ document.addEventListener("DOMContentLoaded", function () {
             closeSettingsPanel();
         }
     });
+
+    // --- Help overlay ---
+    function openHelp() {
+        closeSettingsPanel(true);
+        setTouchKeyboardVisible(false);
+        hideKeyboardGear();
+        helpOverlay.classList.remove("hidden");
+        helpOverlay.setAttribute("aria-hidden", "false");
+    }
+
+    function closeHelp() {
+        helpOverlay.classList.add("hidden");
+        helpOverlay.setAttribute("aria-hidden", "true");
+    }
+
+    if (helpBtn) {
+        helpBtn.addEventListener("click", function () {
+            openHelp();
+        });
+    }
+    if (helpCloseBtn) {
+        helpCloseBtn.addEventListener("click", function () {
+            closeHelp();
+        });
+    }
 
     // --- Select overlay ---
 
@@ -1252,7 +1283,9 @@ document.addEventListener("DOMContentLoaded", function () {
         if (mod) {
             modifiers[mod] = !modifiers[mod];
             btn.classList.toggle("active", modifiers[mod]);
-            if (touchKeyboardEnabled) {
+            // In system-keyboard mode the JS keyboard must stay hidden, so just
+            // keep the terminal focused (system keyboard up) instead.
+            if (touchKeyboardEnabled && !settings.systemKeyboard) {
                 setTouchKeyboardVisible(true);
             } else {
                 focusTerminal();
