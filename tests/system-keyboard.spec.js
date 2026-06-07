@@ -109,6 +109,29 @@ test("System keyboard mode: typing through the focused textarea reaches the PTY"
     await result.context.close();
 });
 
+test("System keyboard mode: tapping a button-bar button does not show the JS keyboard", async ({ browser }) => {
+    var result = await newTouchPage(browser, true);
+    var page = result.page;
+    await gotoReady(page);
+
+    await page.locator("#terminal .xterm-screen").tap();
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-keyboard")).toHaveClass(/hidden/);
+
+    // Tapping a modifier (Ctrl) in the button bar must NOT pop the JS keyboard
+    // above the system keyboard.
+    await page.locator('[data-modifier="ctrl"]').tap();
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-keyboard")).toHaveClass(/hidden/);
+
+    // An arrow key likewise must not show it.
+    await page.locator('#button-bar [data-key="up"]').tap();
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-keyboard")).toHaveClass(/hidden/);
+
+    await result.context.close();
+});
+
 test("System keyboard mode: layout constrains to the area above the keyboard", async ({ browser }) => {
     var result = await newTouchPage(browser, true);
     var page = result.page;
