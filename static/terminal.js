@@ -2,7 +2,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var settingsStorageKey = "we-term-settings";
 
     function loadSettings() {
-        var defaults = { cursorBlink: true, hapticFeedback: true };
+        var defaults = { cursorBlink: true, hapticFeedback: true, systemKeyboard: false };
         try {
             var raw = localStorage.getItem(settingsStorageKey);
             if (!raw) {
@@ -12,6 +12,7 @@ document.addEventListener("DOMContentLoaded", function () {
             return {
                 cursorBlink: parsed.cursorBlink !== false,
                 hapticFeedback: parsed.hapticFeedback !== false,
+                systemKeyboard: parsed.systemKeyboard === true,
             };
         } catch (err) {
             return defaults;
@@ -49,6 +50,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var settingsCloseBtn = document.getElementById("settings-close-btn");
     var cursorBlinkToggle = document.getElementById("cursor-blink-toggle");
     var hapticFeedbackToggle = document.getElementById("haptic-feedback-toggle");
+    var systemKeyboardToggle = document.getElementById("system-keyboard-toggle");
+    var keyboardGearEl = document.getElementById("keyboard-gear");
     var buttonBar = document.getElementById("button-bar");
     var touchKeyboardEl = document.getElementById("touch-keyboard");
     var touchKeyPreviewEl = document.getElementById("touch-key-preview");
@@ -229,10 +232,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function openSettingsPanel() {
         setTouchKeyboardVisible(false);
+        hideKeyboardGear();
         settingsPanel.classList.remove("hidden");
         settingsPanel.setAttribute("aria-hidden", "false");
         cursorBlinkToggle.checked = settings.cursorBlink;
         hapticFeedbackToggle.checked = settings.hapticFeedback;
+        if (systemKeyboardToggle) {
+            systemKeyboardToggle.checked = settings.systemKeyboard;
+        }
     }
 
     function closeSettingsPanel(skipFocus) {
@@ -254,6 +261,45 @@ document.addEventListener("DOMContentLoaded", function () {
         saveSettings(settings);
         syncCursorBlinkState();
     });
+
+    if (systemKeyboardToggle) {
+        systemKeyboardToggle.addEventListener("change", function () {
+            settings.systemKeyboard = systemKeyboardToggle.checked;
+            saveSettings(settings);
+            // Switching keyboard mode reconfigures the xterm textarea (the
+            // JS-keyboard lockdown installs a non-configurable focus override
+            // that cannot be undone live), so reload to apply cleanly. The
+            // server session persists across the reload.
+            window.location.reload();
+        });
+    }
+
+    // --- Keyboard gear (system-keyboard mode) ---
+    // In system-keyboard mode the JS keyboard and its controls are hidden, so
+    // this floating gear gives quick access to Settings to switch back.
+    function showKeyboardGear() {
+        if (keyboardGearEl) {
+            keyboardGearEl.classList.remove("hidden");
+        }
+    }
+
+    function hideKeyboardGear() {
+        if (keyboardGearEl) {
+            keyboardGearEl.classList.add("hidden");
+        }
+    }
+
+    if (keyboardGearEl) {
+        keyboardGearEl.addEventListener("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            // Dismiss the iOS system keyboard before showing settings.
+            if (term.textarea && typeof term.textarea.blur === "function") {
+                term.textarea.blur();
+            }
+            openSettingsPanel();
+        });
+    }
 
     settingsCloseBtn.addEventListener("click", function () {
         closeSettingsPanel();
@@ -784,10 +830,20 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function focusTerminal() {
-        if (touchKeyboardEnabled) {
+        if (touchKeyboardEnabled && !settings.systemKeyboard) {
             return;
         }
         term.focus();
+    }
+
+    // What a single tap on the terminal does in JS-keyboard mode: toggle the
+    // custom keyboard. (System-keyboard mode is handled in the tap handlers by
+    // letting xterm focus the textarea natively, which brings up the iOS
+    // keyboard reliably - a programmatic focus() inside a prevented gesture
+    // does not.)
+    function handleTerminalTap() {
+        setTouchKeyboardVisible(!touchKeyboardVisible);
+        focusTerminal();
     }
 
     function triggerHapticFeedback() {
@@ -1013,7 +1069,7 @@ document.addEventListener("DOMContentLoaded", function () {
         renderTouchKeyboard();
 
         var helperTextarea = termEl.querySelector(".xterm-helper-textarea");
-        if (helperTextarea) {
+        if (helperTextarea && !settings.systemKeyboard) {
             // Prevent the iOS system keyboard from appearing.
             // inputmode="none" tells iOS 16.4+ not to show the virtual keyboard.
             helperTextarea.setAttribute("inputmode", "none");
@@ -1063,10 +1119,13 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
 
-        // Override term.focus() so xterm never tries to focus the
-        // helper textarea on touch devices. The custom keyboard sends
-        // input directly via sendInput(), so xterm focus is not needed.
-        term.focus = function () {};
+        // Override term.focus() so xterm never tries to focus the helper
+        // textarea on touch devices (which would summon the iOS system
+        // keyboard). The custom keyboard sends input directly via sendInput().
+        // In system-keyboard mode we WANT xterm focus, so leave it intact.
+        if (!settings.systemKeyboard) {
+            term.focus = function () {};
+        }
 
         termEl.addEventListener("touchstart", function (e) {
             if (selectOverlay.classList.contains("hidden") === false || pasteOverlay.classList.contains("hidden") === false) {
@@ -1112,10 +1171,14 @@ document.addEventListener("DOMContentLoaded", function () {
                 e.stopPropagation();
                 return;
             }
+            if (settings.systemKeyboard) {
+                // Let xterm focus the textarea natively (brings up iOS keyboard).
+                showKeyboardGear();
+                return;
+            }
             e.preventDefault();
             e.stopPropagation();
-            setTouchKeyboardVisible(!touchKeyboardVisible);
-            focusTerminal();
+            handleTerminalTap();
         }, true);
 
         termEl.addEventListener("touchend", function (e) {
@@ -1131,11 +1194,16 @@ document.addEventListener("DOMContentLoaded", function () {
             if (touchMoved) {
                 return;
             }
+            if (settings.systemKeyboard) {
+                // Don't intercept: let xterm focus the textarea natively so the
+                // iOS system keyboard appears. Just expose the switch-back gear.
+                showKeyboardGear();
+                return;
+            }
             e.preventDefault();
             e.stopPropagation();
             suppressTerminalClickUntil = Date.now() + 300;
-            setTouchKeyboardVisible(!touchKeyboardVisible);
-            focusTerminal();
+            handleTerminalTap();
         }, { passive: false, capture: true });
 
         termEl.addEventListener("touchcancel", function () {
