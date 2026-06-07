@@ -109,6 +109,34 @@ test("System keyboard mode: typing through the focused textarea reaches the PTY"
     await result.context.close();
 });
 
+test("System keyboard mode: layout constrains to the area above the keyboard", async ({ browser }) => {
+    var result = await newTouchPage(browser, true);
+    var page = result.page;
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoReady(page);
+
+    await page.locator("#terminal .xterm-screen").tap();
+    await page.waitForTimeout(300);
+
+    // Simulate the iOS system keyboard appearing by shrinking the viewport.
+    await page.setViewportSize({ width: 390, height: 500 });
+    await page.waitForTimeout(600);
+
+    var info = await page.evaluate(() => ({
+        bodyHeight: document.body.style.height,
+        vvHeight: Math.round(window.visualViewport ? window.visualViewport.height : 0),
+        termBottom: Math.round(document.getElementById("terminal").getBoundingClientRect().bottom),
+        innerHeight: window.innerHeight,
+    }));
+
+    // App is constrained to the visible viewport, not the full pre-keyboard height.
+    expect(info.bodyHeight).toBe(info.vvHeight + "px");
+    // The terminal does not extend below the visible area (i.e. behind the keyboard).
+    expect(info.termBottom).toBeLessThanOrEqual(info.innerHeight + 1);
+
+    await result.context.close();
+});
+
 test("Toggling 'Use system keyboard' persists the setting", async ({ browser }) => {
     var result = await newTouchPage(browser, false);
     var page = result.page;
