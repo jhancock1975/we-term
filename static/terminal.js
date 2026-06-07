@@ -58,6 +58,72 @@ document.addEventListener("DOMContentLoaded", function () {
     var symbolMode = false;
     var activeTouchPreviewKey = null;
 
+    // --- Custom blinking cursor overlay ---
+    // xterm only renders its own cursor element while its textarea is focused.
+    // On touch devices we deliberately keep it unfocused (to suppress the iOS
+    // system keyboard), so xterm draws no cursor at all. This overlay draws a
+    // blinking block at xterm's cursor position, independent of focus. When
+    // xterm IS focused (desktop), it draws its own cursor and we hide ours to
+    // avoid a double cursor.
+    var touchCursorEl = document.createElement("div");
+    touchCursorEl.id = "touch-cursor";
+    touchCursorEl.className = "hidden";
+    touchCursorEl.setAttribute("aria-hidden", "true");
+    termEl.appendChild(touchCursorEl);
+
+    function cursorOverlayBlocked() {
+        if (typeof selectOverlay !== "undefined" && selectOverlay && !selectOverlay.classList.contains("hidden")) {
+            return true;
+        }
+        if (typeof pasteOverlay !== "undefined" && pasteOverlay && !pasteOverlay.classList.contains("hidden")) {
+            return true;
+        }
+        if (settingsPanel && !settingsPanel.classList.contains("hidden")) {
+            return true;
+        }
+        var xtermEl = termEl.querySelector(".xterm");
+        return !!xtermEl && xtermEl.classList.contains("focus");
+    }
+
+    function updateTouchCursor() {
+        if (cursorOverlayBlocked()) {
+            touchCursorEl.classList.add("hidden");
+            return;
+        }
+        var rows = termEl.querySelector(".xterm-rows");
+        if (!rows || rows.children.length === 0) {
+            touchCursorEl.classList.add("hidden");
+            return;
+        }
+        var buffer = term.buffer.active;
+        var row = buffer.cursorY;
+        if (row < 0 || row >= rows.children.length) {
+            touchCursorEl.classList.add("hidden");
+            return;
+        }
+        var rowRect = rows.children[row].getBoundingClientRect();
+        var termRect = termEl.getBoundingClientRect();
+        var cellWidth = rowRect.width / term.cols;
+        var left = (rowRect.left - termRect.left) + buffer.cursorX * cellWidth;
+        var top = rowRect.top - termRect.top;
+        touchCursorEl.style.left = left + "px";
+        touchCursorEl.style.top = top + "px";
+        touchCursorEl.style.width = cellWidth + "px";
+        touchCursorEl.style.height = rowRect.height + "px";
+        touchCursorEl.classList.toggle("no-blink", !settings.cursorBlink);
+        touchCursorEl.classList.remove("hidden");
+    }
+
+    term.onRender(updateTouchCursor);
+    term.onCursorMove(updateTouchCursor);
+    term.onResize(updateTouchCursor);
+    if (typeof term.onScroll === "function") {
+        term.onScroll(updateTouchCursor);
+    }
+    window.addEventListener("resize", function () {
+        requestAnimationFrame(updateTouchCursor);
+    });
+
     // --- WebSocket with auto-reconnect ---
 
     var ws = null;
@@ -157,7 +223,7 @@ document.addEventListener("DOMContentLoaded", function () {
         term.options.cursorBlink = settings.cursorBlink;
         cursorBlinkToggle.checked = settings.cursorBlink;
         hapticFeedbackToggle.checked = settings.hapticFeedback;
-        termEl.classList.toggle("touch-cursor-blink", touchKeyboardEnabled && settings.cursorBlink);
+        updateTouchCursor();
         term.refresh(0, term.rows - 1);
     }
 
