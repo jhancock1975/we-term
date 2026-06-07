@@ -211,6 +211,28 @@ html, body {
     display: none;
 }
 
+#keyboard-gear {
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top));
+    right: calc(8px + env(safe-area-inset-right));
+    z-index: 150;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid #555;
+    background: rgba(45, 45, 45, 0.92);
+    color: #d4d4d4;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+#keyboard-gear.hidden {
+    display: none;
+}
+
 #toast {
     position: fixed;
     top: 50%;
