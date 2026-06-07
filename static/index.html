@@ -55,6 +55,9 @@
                 <li><strong>Sel</strong> selects text, <strong>Paste</strong> pastes, <strong>Tab</strong>, <strong>PgUp</strong>/<strong>PgDn</strong>, and the arrow keys.</li>
             </ul>
 
+            <h2>Autocomplete</h2>
+            <p>As you type on the on&#8209;screen keyboard, a suggestion bar appears above the buttons with matching commands from your history and common commands. Tap one to fill it in &mdash; a trailing space is added automatically. (Available with the on&#8209;screen keyboard.)</p>
+
             <h2>Copy &amp; paste</h2>
             <p><strong>Long&#8209;press</strong> the terminal (or tap <strong>Sel</strong>) to open select mode. Adjust the selection, then tap <strong>Copy</strong>. To paste, tap <strong>Paste</strong>, long&#8209;press the box and choose Paste, then tap <strong>Send</strong>. Images can be pasted too.</p>
 
@@ -85,6 +88,7 @@
         </div>
         <textarea id="paste-area" placeholder="Tap here, then long-press → Paste"></textarea>
     </div>
+    <div id="autocomplete-bar" class="hidden" aria-hidden="true"></div>
     <div id="button-bar">
         <div id="button-scroll">
             <button class="bar-btn" data-action="settings" id="settings-btn" aria-label="Settings">&#9881;</button>

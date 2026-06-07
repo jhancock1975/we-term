@@ -782,6 +782,172 @@ document.addEventListener("DOMContentLoaded", function () {
             var payload = JSON.stringify({ type: "input", data: data });
             ws.send(payload);
         }
+        try { trackAutocompleteInput(data); } catch (e) { /* never break input */ }
+    }
+
+    // --- Autocomplete suggestion bar (JS-keyboard mode) ---
+    // Termux-style: track the current line as the user types via the on-screen
+    // keyboard, and offer a tappable bar of matching commands from history and
+    // a built-in command list. Tapping replaces the line with the suggestion
+    // plus a trailing space. Only active in JS-keyboard mode (system-keyboard
+    // input goes through xterm's textarea and isn't tracked here).
+    var autocompleteBar = document.getElementById("autocomplete-bar");
+    var historyStorageKey = "we-term-history";
+    var commandHistory = loadHistory();
+    var currentLine = "";
+    var autocompleteVisible = false;
+    var acSuppressClickUntil = 0;
+    var COMMON_COMMANDS = [
+        "ls", "cd", "cat", "grep", "find", "echo", "pwd", "mkdir", "rmdir", "rm", "cp", "mv",
+        "touch", "chmod", "chown", "ps", "kill", "top", "htop", "tail", "head", "less", "more",
+        "man", "git", "ssh", "scp", "curl", "wget", "tar", "zip", "unzip", "vim", "vi", "nano",
+        "emacs", "python", "python3", "pip", "node", "npm", "npx", "make", "sudo", "apt",
+        "systemctl", "journalctl", "df", "du", "free", "uname", "whoami", "clear", "exit",
+        "history", "export", "source", "screen", "tmux", "awk", "sed", "sort", "uniq", "wc",
+        "diff", "ln", "which", "date", "sleep",
+    ];
+
+    function loadHistory() {
+        try {
+            var raw = localStorage.getItem(historyStorageKey);
+            var arr = raw ? JSON.parse(raw) : [];
+            return Array.isArray(arr) ? arr.slice(0, 100) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveHistory() {
+        try {
+            localStorage.setItem(historyStorageKey, JSON.stringify(commandHistory.slice(0, 100)));
+        } catch (e) {
+            // ignore storage failures
+        }
+    }
+
+    function addToHistory(line) {
+        line = (line || "").trim();
+        if (!line) return;
+        commandHistory = commandHistory.filter(function (h) { return h !== line; });
+        commandHistory.unshift(line);
+        if (commandHistory.length > 100) commandHistory.length = 100;
+        saveHistory();
+    }
+
+    function autocompleteActive() {
+        return touchKeyboardEnabled && !settings.systemKeyboard;
+    }
+
+    function trackAutocompleteInput(data) {
+        if (!autocompleteActive() || !data) return;
+        if (data.charCodeAt(0) === 0x1b) {
+            // Escape sequence (arrow keys, etc.) recalls/moves the shell line in
+            // ways we can't track; drop our buffer rather than corrupt it.
+            currentLine = "";
+            renderAutocomplete();
+            return;
+        }
+        for (var i = 0; i < data.length; i++) {
+            var ch = data[i];
+            var code = data.charCodeAt(i);
+            if (ch === "\r" || ch === "\n") {
+                addToHistory(currentLine);
+                currentLine = "";
+            } else if (ch === "\x7f" || ch === "\b") {
+                currentLine = currentLine.slice(0, -1);
+            } else if (ch === "\t") {
+                currentLine = ""; // shell tab-completion desyncs us
+            } else if (code === 0x03 || code === 0x15 || code === 0x17 || code === 0x0c) {
+                currentLine = ""; // Ctrl-C / Ctrl-U / Ctrl-W / Ctrl-L
+            } else if (code < 0x20) {
+                // other control characters: ignore for tracking
+            } else {
+                currentLine += ch;
+            }
+        }
+        renderAutocomplete();
+    }
+
+    function getSuggestions(prefix) {
+        var p = prefix.toLowerCase();
+        var out = [];
+        var seen = {};
+        function add(s) {
+            if (s && s !== prefix && !seen[s]) { seen[s] = 1; out.push(s); }
+        }
+        commandHistory.forEach(function (h) {
+            if (h.toLowerCase().indexOf(p) === 0) add(h);
+        });
+        if (prefix.indexOf(" ") === -1) {
+            COMMON_COMMANDS.forEach(function (c) {
+                if (c.indexOf(prefix) === 0) add(c);
+            });
+        }
+        return out.slice(0, 8);
+    }
+
+    function setAutocompleteVisible(visible) {
+        if (autocompleteVisible === visible) return;
+        autocompleteVisible = visible;
+        autocompleteBar.classList.toggle("hidden", !visible);
+        autocompleteBar.setAttribute("aria-hidden", visible ? "false" : "true");
+        requestAnimationFrame(doFit);
+    }
+
+    function renderAutocomplete() {
+        if (!autocompleteBar) return;
+        if (!autocompleteActive() || !touchKeyboardVisible || !currentLine.trim()) {
+            setAutocompleteVisible(false);
+            return;
+        }
+        var suggestions = getSuggestions(currentLine);
+        if (suggestions.length === 0) {
+            setAutocompleteVisible(false);
+            return;
+        }
+        autocompleteBar.innerHTML = suggestions.map(function (s) {
+            return '<button class="ac-chip" type="button">' + escapeHtml(s) + "</button>";
+        }).join("");
+        setAutocompleteVisible(true);
+    }
+
+    function applyAutocomplete(suggestion) {
+        var erase = "";
+        for (var i = 0; i < currentLine.length; i++) {
+            erase += "\x7f";
+        }
+        sendInput(erase + suggestion + " ");
+        triggerHapticFeedback();
+    }
+
+    if (autocompleteBar) {
+        var acTouchX = 0;
+        var acTouchY = 0;
+        var acMoved = false;
+        autocompleteBar.addEventListener("touchstart", function (e) {
+            acTouchX = e.touches[0].clientX;
+            acTouchY = e.touches[0].clientY;
+            acMoved = false;
+        }, { passive: true });
+        autocompleteBar.addEventListener("touchmove", function (e) {
+            if (Math.abs(e.touches[0].clientX - acTouchX) > 10 || Math.abs(e.touches[0].clientY - acTouchY) > 10) {
+                acMoved = true;
+            }
+        }, { passive: true });
+        autocompleteBar.addEventListener("touchend", function (e) {
+            var chip = e.target.closest(".ac-chip");
+            if (!chip || acMoved) return;
+            e.preventDefault();
+            acSuppressClickUntil = Date.now() + 400;
+            applyAutocomplete(chip.textContent);
+        });
+        autocompleteBar.addEventListener("click", function (e) {
+            var chip = e.target.closest(".ac-chip");
+            if (!chip) return;
+            e.preventDefault();
+            if (Date.now() < acSuppressClickUntil) return;
+            applyAutocomplete(chip.textContent);
+        });
     }
 
     function uploadImage(blob) {
@@ -1052,6 +1218,7 @@ document.addEventListener("DOMContentLoaded", function () {
             hideTouchKeyPreview();
         }
         renderTouchKeyboard();
+        renderAutocomplete();
         requestAnimationFrame(doFit);
     }
 
