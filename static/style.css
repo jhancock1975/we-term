@@ -1,9 +1,19 @@
 /* Optimized for Chrome on iPhone 17 Pro Max (440x956 @ 3x) */
 
+:root {
+    --app-font: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+}
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+}
+
+/* Form controls do not inherit font-family by default, so they would fall
+   back to the UA serif (Times New Roman). Make everything use the app font. */
+button, input, textarea, select {
+    font-family: inherit;
 }
 
 html, body {
@@ -11,6 +21,7 @@ html, body {
     width: 100%;
     overflow: hidden;
     background: #000;
+    font-family: var(--app-font);
     display: flex;
     flex-direction: column;
     padding-top: env(safe-area-inset-top);
@@ -89,7 +100,7 @@ html, body {
     color: #d4d4d4;
     border: 1px solid #555;
     border-radius: 4px;
-    font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+    font-family: var(--app-font);
     font-size: 12px;
     cursor: pointer;
     touch-action: pan-x;
@@ -139,7 +150,7 @@ html, body {
     color: #d4d4d4;
     border: 1px solid #4a4a4a;
     border-radius: 6px;
-    font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+    font-family: var(--app-font);
     font-size: 14px;
     line-height: 1;
     cursor: pointer;
@@ -185,7 +196,7 @@ html, body {
     background: linear-gradient(180deg, #595959 0%, #3c3c3c 100%);
     border: 1px solid #6f6f6f;
     color: #ffffff;
-    font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+    font-family: var(--app-font);
     font-size: 22px;
     line-height: 1;
     text-align: center;
@@ -366,7 +377,7 @@ html, body {
     -webkit-overflow-scrolling: touch;
     padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
     margin: 0;
-    font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+    font-family: var(--app-font);
     font-size: 14px;
     line-height: 1.4;
     color: #d4d4d4;
@@ -430,7 +441,7 @@ html, body {
     outline: none;
     background: #1e1e1e;
     color: #d4d4d4;
-    font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+    font-family: var(--app-font);
     font-size: 14px;
     line-height: 1.4;
     -webkit-user-select: text;
