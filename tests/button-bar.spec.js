@@ -178,17 +178,28 @@ test("Settings button controls touch cursor blink", async ({ browser }) => {
 
     var labels = await page.locator("#button-scroll .bar-btn").evaluateAll((buttons) => buttons.slice(0, 2).map((button) => button.textContent.trim()));
     expect(labels).toEqual(["Set", "Ctrl"]);
-    await expect(page.locator("#terminal")).toHaveClass(/touch-cursor-blink/);
 
+    // Blink on by default: the cursor overlay is animated.
+    await expect(page.locator("#touch-cursor")).not.toHaveClass(/hidden/, { timeout: 2000 });
+    await expect(page.locator("#touch-cursor")).not.toHaveClass(/no-blink/);
+
+    // Disable blink via settings -> overlay becomes steady (no animation).
     await page.locator("#settings-btn").tap();
     await expect(page.locator("#settings-panel")).not.toHaveClass(/hidden/, { timeout: 2000 });
     await expect(page.locator("#haptic-feedback-toggle")).toBeChecked();
     await page.locator("#cursor-blink-toggle").uncheck();
-    await expect(page.locator("#terminal")).not.toHaveClass(/touch-cursor-blink/, { timeout: 2000 });
+    await page.locator("#settings-close-btn").tap();
+    await expect(page.locator("#settings-panel")).toHaveClass(/hidden/, { timeout: 2000 });
+    await page.locator("#terminal .xterm-screen").tap(); // trigger a re-render of the cursor overlay
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-cursor")).toHaveClass(/no-blink/, { timeout: 2000 });
 
+    // Persists across reload.
     await page.reload();
     await waitForTerminalReady(page);
-    await expect(page.locator("#terminal")).not.toHaveClass(/touch-cursor-blink/, { timeout: 2000 });
+    await page.locator("#terminal .xterm-screen").tap();
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-cursor")).toHaveClass(/no-blink/, { timeout: 2000 });
 
     await context.close();
 });

@@ -20,6 +20,7 @@ html, body {
 }
 
 #terminal {
+    position: relative;
     flex: 1;
     min-height: 0;
     width: 100%;
@@ -27,24 +28,35 @@ html, body {
 
 @keyframes touch-cursor-blink {
     0%, 49% {
-        background-color: #ffffff;
-        box-shadow: none;
-        color: #000000;
+        opacity: 1;
     }
     50%, 100% {
-        background-color: transparent;
-        box-shadow: inset 0 0 0 1px #ffffff;
-        color: inherit;
+        opacity: 0;
     }
 }
 
-#terminal.touch-cursor-blink .xterm-rows .xterm-cursor.xterm-cursor-block {
-    animation: touch-cursor-blink 1s step-end infinite;
+/* Custom cursor overlay. xterm only renders its own cursor while the textarea
+   is focused; on touch devices we keep it unfocused (to suppress the iOS
+   system keyboard), so this draws a blinking block at the cursor position. */
+#touch-cursor {
+    position: absolute;
+    z-index: 5;
+    pointer-events: none;
+    background: #ffffff;
+    /* Invert the cell beneath, like a real terminal block cursor, so the
+       character under the cursor stays readable. */
+    mix-blend-mode: difference;
+    opacity: 1;
+    animation: touch-cursor-blink 1.06s step-end infinite;
 }
 
-#terminal.touch-cursor-blink .xterm-rows .xterm-cursor.xterm-cursor-block {
-    background-color: #ffffff;
-    color: #000000;
+#touch-cursor.hidden {
+    display: none;
+}
+
+#touch-cursor.no-blink {
+    animation: none;
+    opacity: 1;
 }
 
 #button-bar {
