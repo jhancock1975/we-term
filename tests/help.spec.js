@@ -51,12 +51,12 @@ test("Help opens a full-screen page with an X close button and explains the app"
     await expect(page.locator("#help-overlay")).not.toHaveClass(/hidden/, { timeout: 2000 });
     await expect(page.locator("#settings-panel")).toHaveClass(/hidden/);
 
-    // X close button is present in the upper-left.
+    // X close button is present in the upper-right.
     var close = page.locator("#help-close-btn");
     await expect(close).toBeVisible();
     var box = await close.boundingBox();
     var vw = page.viewportSize();
-    expect(box.x).toBeLessThan(vw.width / 2);
+    expect(box.x + box.width).toBeGreaterThan(vw.width / 2);
     expect(box.y).toBeLessThan(vw.height / 2);
 
     // Content explains how to use the app.

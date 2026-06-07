@@ -70,6 +70,45 @@ html, body {
     opacity: 1;
 }
 
+#autocomplete-bar {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 5px 6px;
+    background: #252526;
+    border-top: 1px solid #3a3a3a;
+    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+#autocomplete-bar::-webkit-scrollbar {
+    display: none;
+}
+
+#autocomplete-bar.hidden {
+    display: none;
+}
+
+.ac-chip {
+    flex: 0 0 auto;
+    max-width: 70vw;
+    padding: 7px 12px;
+    background: #0e639c;
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    font-family: var(--app-font);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
 #button-bar {
     background: #2d2d2d;
     border-top: 1px solid #444;
@@ -363,7 +402,7 @@ html, body {
 .help-close {
     position: fixed;
     top: calc(8px + env(safe-area-inset-top));
-    left: calc(8px + env(safe-area-inset-left));
+    right: calc(8px + env(safe-area-inset-right));
     z-index: 231;
     width: 40px;
     height: 40px;
