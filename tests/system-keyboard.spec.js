@@ -109,6 +109,27 @@ test("System keyboard mode: typing through the focused textarea reaches the PTY"
     await result.context.close();
 });
 
+test("System keyboard mode: gear returns after closing Settings", async ({ browser }) => {
+    var result = await newTouchPage(browser, true);
+    var page = result.page;
+    await gotoReady(page);
+
+    await page.locator("#terminal .xterm-screen").tap();
+    await expect(page.locator("#keyboard-gear")).not.toHaveClass(/hidden/, { timeout: 2000 });
+
+    // Open settings via the gear (gear hides), then close with Done.
+    await page.locator("#keyboard-gear").tap();
+    await expect(page.locator("#settings-panel")).not.toHaveClass(/hidden/, { timeout: 2000 });
+    await expect(page.locator("#keyboard-gear")).toHaveClass(/hidden/);
+
+    await page.locator("#settings-close-btn").tap();
+    await expect(page.locator("#settings-panel")).toHaveClass(/hidden/, { timeout: 2000 });
+    // The switch-back gear must come back so the user isn't stranded.
+    await expect(page.locator("#keyboard-gear")).not.toHaveClass(/hidden/, { timeout: 2000 });
+
+    await result.context.close();
+});
+
 test("System keyboard mode: tapping a button-bar button does not show the JS keyboard", async ({ browser }) => {
     var result = await newTouchPage(browser, true);
     var page = result.page;

@@ -92,6 +92,13 @@ html, body {
     display: none;
 }
 
+/* The settings button is a gear glyph; render it a bit larger than the
+   text labels on the other bar buttons. */
+#settings-btn {
+    font-size: 20px;
+    line-height: 1;
+}
+
 .bar-btn {
     flex: 0 0 auto;
     min-width: 38px;
