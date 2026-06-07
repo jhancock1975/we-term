@@ -388,6 +388,33 @@ test("index.html references terminal.js and style.css with a cache-busting versi
     expect(jsResponse.status()).toBe(200);
 });
 
+test("cache-busting ?v= equals the content hash of terminal.js + style.css", async ({ page }) => {
+    var crypto = require("crypto");
+    var fs = require("fs");
+    var path = require("path");
+
+    var dir = path.join(__dirname, "..", "static");
+    var h = crypto.createHash("sha1");
+    h.update(fs.readFileSync(path.join(dir, "terminal.js")));
+    h.update(fs.readFileSync(path.join(dir, "style.css")));
+    var expected = h.digest("hex").slice(0, 12);
+
+    var response = await page.goto("/");
+    var html = await response.text();
+
+    var jsMatch = html.match(/\/static\/terminal\.js\?v=([a-zA-Z0-9]+)/);
+    var cssMatch = html.match(/\/static\/style\.css\?v=([a-zA-Z0-9]+)/);
+
+    expect(jsMatch, "terminal.js should have ?v= version").not.toBeNull();
+    expect(cssMatch, "style.css should have ?v= version").not.toBeNull();
+
+    // The served version must equal the content hash, so it changes when the
+    // asset content changes -- the whole point of cache-busting.
+    expect(jsMatch[1]).toBe(expected);
+    // Both assets share the same content-derived token.
+    expect(cssMatch[1]).toBe(expected);
+});
+
 // ---------------------------------------------------------------------------
 // End-to-end: typing works after tap on touch device
 // ---------------------------------------------------------------------------
