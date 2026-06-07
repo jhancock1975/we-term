@@ -1174,6 +1174,9 @@ document.addEventListener("DOMContentLoaded", function () {
             if (settings.systemKeyboard) {
                 // Let xterm focus the textarea natively (brings up iOS keyboard).
                 showKeyboardGear();
+                // Re-fit once the keyboard has finished sliding up, in case the
+                // visualViewport resize doesn't fire on this device.
+                setTimeout(updateLayout, 350);
                 return;
             }
             e.preventDefault();
@@ -1198,6 +1201,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 // Don't intercept: let xterm focus the textarea natively so the
                 // iOS system keyboard appears. Just expose the switch-back gear.
                 showKeyboardGear();
+                // Re-fit once the keyboard has finished sliding up, in case the
+                // visualViewport resize doesn't fire on this device.
+                setTimeout(updateLayout, 350);
                 return;
             }
             e.preventDefault();
@@ -1315,8 +1321,20 @@ document.addEventListener("DOMContentLoaded", function () {
     function updateLayout() {
         if (window.visualViewport) {
             window.scrollTo(0, 0);
+            if (touchKeyboardEnabled && settings.systemKeyboard) {
+                // The iOS system keyboard overlays the page rather than
+                // shrinking it reliably, so the active input line ends up
+                // rendered behind the keyboard. Constrain the app to the
+                // visible area above the keyboard so it stays in view.
+                document.body.style.height = window.visualViewport.height + "px";
+            } else {
+                document.body.style.height = "";
+            }
         }
         doFit();
+        if (touchKeyboardEnabled && settings.systemKeyboard) {
+            term.scrollToBottom();
+        }
     }
 
     if (window.visualViewport) {
