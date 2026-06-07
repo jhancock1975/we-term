@@ -21,7 +21,13 @@ async function waitForTerminalReady(page) {
 async function newTouchPage(browser, permissions) {
     var context = await browser.newContext({ hasTouch: true });
     if (permissions && permissions.length > 0) {
-        await context.grantPermissions(permissions, { origin: TEST_BASE_URL });
+        // WebKit rejects unknown permission names (e.g. clipboard-write), so
+        // grant best-effort and don't fail setup if unsupported.
+        try {
+            await context.grantPermissions(permissions, { origin: TEST_BASE_URL });
+        } catch (err) {
+            // ignore - clipboard-dependent assertions are skipped on WebKit
+        }
     }
     var page = await context.newPage();
     return { context: context, page: page };
@@ -70,11 +76,41 @@ async function ensureTouchTerminalOutput(page) {
     }, {}, { timeout: 10000 });
 }
 
+async function ensureKeyboardVisible(page) {
+    var hidden = await page.locator("#touch-keyboard").evaluate((el) => el.classList.contains("hidden"));
+    if (hidden) {
+        await page.locator("#terminal .xterm-screen").tap();
+        await page.waitForTimeout(200);
+    }
+}
+
+// Type via the on-screen keyboard. On touch devices the xterm textarea is
+// locked down (un-focusable to suppress the iOS keyboard), so page.keyboard
+// cannot reach the terminal - the custom keyboard is the real input path.
+async function typeViaKeys(page, str) {
+    for (var i = 0; i < str.length; i++) {
+        var ch = str[i];
+        if (ch === "\n") {
+            await page.locator('[data-touch-key="enter"]').tap();
+        } else if (ch === " ") {
+            await page.locator('[data-touch-key="space"]').tap();
+        } else if (ch >= "A" && ch <= "Z") {
+            await page.locator('[data-touch-key="shift"]').tap();
+            await page.locator('[data-touch-key="' + ch.toLowerCase() + '"]').tap();
+        } else if (ch === "_") {
+            await page.locator('[data-touch-key="shift"]').tap();
+            await page.locator('[data-touch-key="-"]').tap();
+        } else {
+            await page.locator('[data-touch-key="' + ch + '"]').tap();
+        }
+        await page.waitForTimeout(40);
+    }
+}
+
 async function typeInTerminal(page, text) {
-    await page.locator("#terminal .xterm-screen").click();
-    await page.waitForTimeout(200);
-    await page.keyboard.type(text);
-    await page.keyboard.press("Enter");
+    await ensureKeyboardVisible(page);
+    await typeViaKeys(page, text);
+    await page.locator('[data-touch-key="enter"]').tap();
     await page.waitForTimeout(500);
 }
 
@@ -107,7 +143,8 @@ test("Long press opens select overlay with toolbar", async ({ browser }) => {
     await context.close();
 });
 
-test("Copy button copies selected text to clipboard", async ({ browser }) => {
+test("Copy button copies selected text to clipboard", async ({ browser, browserName }) => {
+    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
     var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
     var context = result.context;
     var page = result.page;
@@ -139,7 +176,8 @@ test("Copy button copies selected text to clipboard", async ({ browser }) => {
     await context.close();
 });
 
-test("Copy button works via touch tap", async ({ browser }) => {
+test("Copy button works via touch tap", async ({ browser, browserName }) => {
+    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
     var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
     var context = result.context;
     var page = result.page;
@@ -168,7 +206,8 @@ test("Copy button works via touch tap", async ({ browser }) => {
     await context.close();
 });
 
-test("Done button closes select overlay without copying", async ({ browser }) => {
+test("Done button closes select overlay without copying", async ({ browser, browserName }) => {
+    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
     var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
     var context = result.context;
     var page = result.page;
@@ -237,7 +276,8 @@ test("Copy works with fallback when clipboard API is unavailable", async ({ brow
     await context.close();
 });
 
-test("Copy specific text from bash echo output", async ({ browser }) => {
+test("Copy specific text from bash echo output", async ({ browser, browserName }) => {
+    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
     var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
     var context = result.context;
     var page = result.page;
@@ -282,7 +322,8 @@ test("Copy specific text from bash echo output", async ({ browser }) => {
     await context.close();
 });
 
-test("Copy text from screen session", async ({ browser }) => {
+test("Copy text from screen session", async ({ browser, browserName }) => {
+    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
     var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
     var context = result.context;
     var page = result.page;
@@ -295,11 +336,8 @@ test("Copy text from screen session", async ({ browser }) => {
     await typeInTerminal(page, "screen -r test_session");
     await page.waitForTimeout(1000);
 
-    await page.locator("#terminal .xterm-screen").click();
-    await page.waitForTimeout(200);
-    await page.keyboard.type("echo SCREEN_COPY_TEST_67890");
-    await page.keyboard.press("Enter");
-    await page.waitForTimeout(1000);
+    await typeInTerminal(page, "echo SCREEN_COPY_TEST_67890");
+    await page.waitForTimeout(500);
 
     await waitForTerminalText(page, "SCREEN_COPY_TEST_67890");
 
@@ -334,10 +372,7 @@ test("Copy text from screen session", async ({ browser }) => {
     var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboardText).toBe("SCREEN_COPY_TEST_67890");
 
-    await page.locator("#terminal .xterm-screen").click();
-    await page.waitForTimeout(200);
-    await page.keyboard.type("exit");
-    await page.keyboard.press("Enter");
+    await typeInTerminal(page, "exit");
     await page.waitForTimeout(500);
 
     await context.close();
