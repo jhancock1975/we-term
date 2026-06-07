@@ -105,6 +105,13 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
         var buffer = term.buffer.active;
+        // When scrolled up into the scrollback, the live cursor is off-screen;
+        // cursorY is viewport-relative and would otherwise place a phantom
+        // cursor on whatever line now occupies that slot.
+        if (buffer.viewportY !== buffer.baseY) {
+            touchCursorEl.classList.add("hidden");
+            return;
+        }
         var row = buffer.cursorY;
         if (row < 0 || row >= rows.children.length) {
             touchCursorEl.classList.add("hidden");
@@ -253,6 +260,11 @@ document.addEventListener("DOMContentLoaded", function () {
         settingsPanel.setAttribute("aria-hidden", "true");
         if (!skipFocus) {
             focusTerminal();
+            // In system-keyboard mode, returning to the terminal re-shows the
+            // keyboard; restore the switch-back gear too.
+            if (settings.systemKeyboard) {
+                showKeyboardGear();
+            }
         }
     }
 
@@ -329,6 +341,9 @@ document.addEventListener("DOMContentLoaded", function () {
     function closeHelp() {
         helpOverlay.classList.add("hidden");
         helpOverlay.setAttribute("aria-hidden", "true");
+        if (settings.systemKeyboard) {
+            showKeyboardGear();
+        }
     }
 
     if (helpBtn) {

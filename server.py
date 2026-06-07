@@ -202,12 +202,12 @@ def _asset_version(*filenames):
 
 
 async def index_handler(request):
-    with open(os.path.join(STATIC_DIR, "index.html"), "r") as f:
+    with open(os.path.join(STATIC_DIR, "index.html"), "r", encoding="utf-8") as f:
         html = f.read()
     version = _asset_version("terminal.js", "style.css")
     html = html.replace("/static/terminal.js", "/static/terminal.js?v=" + version)
     html = html.replace("/static/style.css", "/static/style.css?v=" + version)
-    return web.Response(text=html, content_type="text/html")
+    return web.Response(text=html, content_type="text/html", charset="utf-8")
 
 
 async def upload_handler(request):
