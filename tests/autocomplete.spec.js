@@ -122,6 +122,61 @@ test("Suggestion bar is hidden in system-keyboard mode", async ({ browser }) => 
     await result.context.close();
 });
 
+test("POST /complete returns shell command candidates", async ({ request }) => {
+    var res = await request.post("/complete", { data: { line: "gi" } });
+    var body = await res.json();
+    expect(Array.isArray(body.candidates)).toBe(true);
+    expect(body.candidates).toContain("git"); // compgen -c
+});
+
+test("Server file completion suggests files in the shell's cwd", async ({ browser }) => {
+    var result = await newTouchPage(browser, false);
+    var page = result.page;
+    await gotoReady(page);
+
+    // compgen -f runs in the live shell's cwd, which for the test server is the
+    // repo root -> "ser" completes to "server.py".
+    await typeViaKeys(page, "cat ser");
+    var chip = page.locator(".ac-chip", { hasText: /^server\.py$/ });
+    await expect(chip).toBeVisible({ timeout: 5000 });
+
+    // Tapping inserts the whole completed line + a trailing space.
+    await page.evaluate(() => { window.__wsSent = []; });
+    await chip.tap();
+    await page.waitForTimeout(200);
+    var combined = inputs(await page.evaluate(() => window.__wsSent)).join("");
+    expect(combined).toContain("cat server.py ");
+
+    await result.context.close();
+});
+
+test("Command completion can be turned off in Settings", async ({ browser }) => {
+    var result = await newTouchPage(browser, false);
+    var page = result.page;
+    await gotoReady(page);
+
+    // On by default: typing shows the bar.
+    await typeViaKeys(page, "gi");
+    await expect(page.locator("#autocomplete-bar")).not.toHaveClass(/hidden/, { timeout: 2000 });
+
+    // Turn the setting off.
+    await page.locator("#settings-btn").tap();
+    await expect(page.locator("#settings-panel")).not.toHaveClass(/hidden/, { timeout: 2000 });
+    await expect(page.locator("#autocomplete-toggle")).toBeChecked();
+    await page.locator("#autocomplete-toggle").uncheck();
+    await page.locator("#settings-close-btn").tap();
+    await expect(page.locator("#settings-panel")).toHaveClass(/hidden/, { timeout: 2000 });
+
+    // Re-show the keyboard and type: no suggestion bar now.
+    await page.locator("#terminal .xterm-screen").tap();
+    await page.waitForTimeout(200);
+    await typeViaKeys(page, "gi");
+    await page.waitForTimeout(400);
+    await expect(page.locator("#autocomplete-bar")).toHaveClass(/hidden/);
+
+    await result.context.close();
+});
+
 test("Suggestion bar hides after submitting (Enter)", async ({ browser }) => {
     var result = await newTouchPage(browser, false);
     var page = result.page;
