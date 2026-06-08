@@ -177,16 +177,44 @@ test("Command completion can be turned off in Settings", async ({ browser }) => 
     await result.context.close();
 });
 
-test("Suggestion bar hides after submitting (Enter)", async ({ browser }) => {
+test("Suggestion strip persists (no resize churn) and shows recent history after Enter", async ({ browser }) => {
     var result = await newTouchPage(browser, false);
     var page = result.page;
     await gotoReady(page);
 
-    await typeViaKeys(page, "gi");
-    await expect(page.locator("#autocomplete-bar")).not.toHaveClass(/hidden/, { timeout: 2000 });
-    await page.locator('[data-touch-key="enter"]').tap();
+    await typeViaKeys(page, "echo persist\n");
+    await page.waitForTimeout(400);
+
+    // The strip stays visible (fixed-height persistent bar) and lists the
+    // just-run command from history rather than collapsing the layout.
+    await expect(page.locator("#autocomplete-bar")).not.toHaveClass(/hidden/);
+    await expect(page.locator(".ac-chip", { hasText: /^echo persist$/ })).toBeVisible();
+
+    await result.context.close();
+});
+
+test("No suggestions while a password prompt is shown", async ({ browser }) => {
+    var result = await newTouchPage(browser, false);
+    var page = result.page;
+    await gotoReady(page);
+
+    // Seed history so the strip would otherwise have something to show.
+    await typeViaKeys(page, "echo seed\n");
+    await page.waitForTimeout(300);
+
+    // A silent read whose prompt line contains "password".
+    await typeViaKeys(page, "read -sp password x\n");
+    await page.waitForTimeout(500);
+
+    // Strip must be hidden while the password prompt is on screen.
+    await expect(page.locator("#autocomplete-bar")).toHaveClass(/hidden/, { timeout: 3000 });
+
+    // Typing during the prompt still shows nothing.
+    await typeViaKeys(page, "se");
     await page.waitForTimeout(300);
     await expect(page.locator("#autocomplete-bar")).toHaveClass(/hidden/);
 
+    // Finish the read to return to a normal prompt.
+    await page.locator('[data-touch-key="enter"]').tap();
     await result.context.close();
 });

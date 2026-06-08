@@ -814,6 +814,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var acSuppressClickUntil = 0;
     var serverCompletions = { line: null, candidates: [] };
     var completionTimer = null;
+    var passwordMode = false;
     var COMMON_COMMANDS = [
         "ls", "cd", "cat", "grep", "find", "echo", "pwd", "mkdir", "rmdir", "rm", "cp", "mv",
         "touch", "chmod", "chown", "ps", "kill", "top", "htop", "tail", "head", "less", "more",
@@ -852,7 +853,37 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function autocompleteActive() {
-        return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete;
+        return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete && !passwordMode;
+    }
+
+    // Never offer suggestions while a password/passphrase is being entered.
+    // ECHO state can't distinguish this (readline keeps ECHO off at the normal
+    // prompt too), so detect it from the prompt text on the cursor's line.
+    function setPasswordMode(value) {
+        if (passwordMode === value) return;
+        passwordMode = value;
+        if (value) {
+            currentLine = "";
+            serverCompletions = { line: null, candidates: [] };
+        }
+        renderAutocomplete();
+    }
+
+    function detectPasswordPrompt() {
+        if (!autocompleteBar) return;
+        try {
+            var buf = term.buffer.active;
+            var text = "";
+            if (buf.cursorY > 0) {
+                var prev = buf.getLine(buf.cursorY - 1);
+                if (prev) text += prev.translateToString(true) + " ";
+            }
+            var cur = buf.getLine(buf.cursorY);
+            if (cur) text += cur.translateToString(true);
+            setPasswordMode(/pass(word|phrase)/i.test(text));
+        } catch (e) {
+            setPasswordMode(false);
+        }
     }
 
     function trackAutocompleteInput(data) {
@@ -954,17 +985,23 @@ document.addEventListener("DOMContentLoaded", function () {
         requestAnimationFrame(doFit);
     }
 
+    function recentHistoryItems() {
+        return commandHistory.slice(0, 12).map(function (h) {
+            return { display: h, insert: h };
+        });
+    }
+
     function renderAutocomplete() {
         if (!autocompleteBar) return;
-        if (!autocompleteActive() || !touchKeyboardVisible || !currentLine.trim()) {
+        // Persistent strip: visible whenever the on-screen keyboard is up (and
+        // autocomplete is enabled and we're not in a password prompt). Its
+        // height is fixed in CSS, so changing the chips never resizes the
+        // terminal - only showing/hiding the whole strip does.
+        if (!autocompleteActive() || !touchKeyboardVisible) {
             setAutocompleteVisible(false);
             return;
         }
-        var items = buildItems();
-        if (items.length === 0) {
-            setAutocompleteVisible(false);
-            return;
-        }
+        var items = currentLine.trim() ? buildItems() : recentHistoryItems();
         autocompleteBar.innerHTML = items.map(function (it) {
             return '<button class="ac-chip" type="button" data-ac-value="' + escapeHtml(it.insert) + '">' + escapeHtml(it.display) + "</button>";
         }).join("");
@@ -1008,6 +1045,9 @@ document.addEventListener("DOMContentLoaded", function () {
             if (Date.now() < acSuppressClickUntil) return;
             applyAutocomplete(chip.getAttribute("data-ac-value"));
         });
+
+        // Detect password/passphrase prompts from terminal output as it renders.
+        term.onRender(detectPasswordPrompt);
     }
 
     function uploadImage(blob) {
