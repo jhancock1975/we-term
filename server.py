@@ -6,6 +6,7 @@ import os
 import pty
 import signal
 import struct
+import subprocess
 import termios
 import time
 
@@ -238,10 +239,71 @@ async def upload_handler(request):
     return web.json_response({"path": filepath})
 
 
+def _session_cwd():
+    """Current working directory of the live shell, for path completion."""
+    try:
+        if session is not None and session.pid:
+            return os.readlink("/proc/{pid}/cwd".format(pid=session.pid))
+    except OSError:
+        pass
+    return os.path.expanduser("~")
+
+
+def _run_compgen(mode, token, cwd):
+    """Run bash compgen for command or file completion of `token`.
+
+    The user-supplied token and cwd are passed via the environment (never
+    interpolated into the script) so they cannot inject shell code.
+    """
+    if mode == "command":
+        script = 'compgen -c -- "$WT_TOKEN" 2>/dev/null | sort -u | head -n 40'
+    else:
+        script = 'cd "$WT_CWD" 2>/dev/null && compgen -f -- "$WT_TOKEN" 2>/dev/null | sort -u | head -n 40'
+    env = {
+        "WT_TOKEN": token,
+        "WT_CWD": cwd,
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": os.environ.get("HOME", "/"),
+    }
+    try:
+        result = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True, text=True, timeout=2, env=env,
+        )
+        return [line for line in result.stdout.split("\n") if line][:20]
+    except Exception:
+        return []
+
+
+async def complete_handler(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    line = data.get("line", "")
+    if not isinstance(line, str):
+        line = ""
+
+    # Complete the last whitespace-separated token. If there is a preceding
+    # token, complete a file/path; otherwise complete a command name.
+    if " " in line.rstrip():
+        token = line[line.rfind(" ") + 1:]
+        mode = "file"
+    else:
+        token = line.strip()
+        mode = "command"
+        if token == "":
+            return web.json_response({"candidates": [], "token": token})
+
+    candidates = _run_compgen(mode, token, _session_cwd())
+    return web.json_response({"candidates": candidates, "token": token})
+
+
 app = web.Application(middlewares=[no_cache_middleware])
 app.router.add_get("/ws", websocket_handler)
 app.router.add_get("/", index_handler)
 app.router.add_post("/upload", upload_handler)
+app.router.add_post("/complete", complete_handler)
 app.router.add_static("/static", STATIC_DIR)
 
 if __name__ == "__main__":

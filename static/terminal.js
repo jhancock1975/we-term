@@ -2,7 +2,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var settingsStorageKey = "we-term-settings";
 
     function loadSettings() {
-        var defaults = { cursorBlink: true, hapticFeedback: true, systemKeyboard: false };
+        var defaults = { cursorBlink: true, hapticFeedback: true, systemKeyboard: false, autocomplete: true };
         try {
             var raw = localStorage.getItem(settingsStorageKey);
             if (!raw) {
@@ -13,6 +13,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 cursorBlink: parsed.cursorBlink !== false,
                 hapticFeedback: parsed.hapticFeedback !== false,
                 systemKeyboard: parsed.systemKeyboard === true,
+                autocomplete: parsed.autocomplete !== false,
             };
         } catch (err) {
             return defaults;
@@ -51,6 +52,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var cursorBlinkToggle = document.getElementById("cursor-blink-toggle");
     var hapticFeedbackToggle = document.getElementById("haptic-feedback-toggle");
     var systemKeyboardToggle = document.getElementById("system-keyboard-toggle");
+    var autocompleteToggle = document.getElementById("autocomplete-toggle");
     var keyboardGearEl = document.getElementById("keyboard-gear");
     var helpOverlay = document.getElementById("help-overlay");
     var helpBtn = document.getElementById("help-btn");
@@ -253,6 +255,9 @@ document.addEventListener("DOMContentLoaded", function () {
         if (systemKeyboardToggle) {
             systemKeyboardToggle.checked = settings.systemKeyboard;
         }
+        if (autocompleteToggle) {
+            autocompleteToggle.checked = settings.autocomplete;
+        }
     }
 
     function closeSettingsPanel(skipFocus) {
@@ -289,6 +294,16 @@ document.addEventListener("DOMContentLoaded", function () {
             // that cannot be undone live), so reload to apply cleanly. The
             // server session persists across the reload.
             window.location.reload();
+        });
+    }
+
+    if (autocompleteToggle) {
+        autocompleteToggle.addEventListener("change", function () {
+            settings.autocomplete = autocompleteToggle.checked;
+            saveSettings(settings);
+            currentLine = "";
+            serverCompletions = { line: null, candidates: [] };
+            renderAutocomplete();
         });
     }
 
@@ -797,6 +812,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var currentLine = "";
     var autocompleteVisible = false;
     var acSuppressClickUntil = 0;
+    var serverCompletions = { line: null, candidates: [] };
+    var completionTimer = null;
     var COMMON_COMMANDS = [
         "ls", "cd", "cat", "grep", "find", "echo", "pwd", "mkdir", "rmdir", "rm", "cp", "mv",
         "touch", "chmod", "chown", "ps", "kill", "top", "htop", "tail", "head", "less", "more",
@@ -835,7 +852,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function autocompleteActive() {
-        return touchKeyboardEnabled && !settings.systemKeyboard;
+        return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete;
     }
 
     function trackAutocompleteInput(data) {
@@ -845,6 +862,7 @@ document.addEventListener("DOMContentLoaded", function () {
             // ways we can't track; drop our buffer rather than corrupt it.
             currentLine = "";
             renderAutocomplete();
+            scheduleCompletion();
             return;
         }
         for (var i = 0; i < data.length; i++) {
@@ -866,24 +884,66 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         }
         renderAutocomplete();
+        scheduleCompletion();
     }
 
-    function getSuggestions(prefix) {
+    // Ask the server for real shell completions (compgen in the live shell's
+    // cwd) for the current line, debounced. Command name for the first token,
+    // file/path for later tokens.
+    function scheduleCompletion() {
+        if (completionTimer) {
+            clearTimeout(completionTimer);
+            completionTimer = null;
+        }
+        if (!autocompleteActive() || !currentLine.trim()) {
+            return;
+        }
+        var lineAtRequest = currentLine;
+        completionTimer = setTimeout(function () {
+            fetch("/complete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ line: lineAtRequest }),
+            }).then(function (r) {
+                return r.json();
+            }).then(function (data) {
+                serverCompletions = { line: lineAtRequest, candidates: (data && data.candidates) || [] };
+                if (lineAtRequest === currentLine) {
+                    renderAutocomplete();
+                }
+            }).catch(function () { /* completion is best-effort */ });
+        }, 160);
+    }
+
+    // Build the suggestion list: history + built-in commands (full-line) merged
+    // with server shell-completions (token-level). Each item carries the text
+    // to insert (the full resulting line) and a display label.
+    function buildItems() {
+        var prefix = currentLine;
         var p = prefix.toLowerCase();
         var out = [];
         var seen = {};
-        function add(s) {
-            if (s && s !== prefix && !seen[s]) { seen[s] = 1; out.push(s); }
+        function add(display, insert) {
+            if (!insert || insert === prefix || seen[insert]) return;
+            seen[insert] = 1;
+            out.push({ display: display, insert: insert });
         }
         commandHistory.forEach(function (h) {
-            if (h.toLowerCase().indexOf(p) === 0) add(h);
+            if (h.toLowerCase().indexOf(p) === 0) add(h, h);
         });
         if (prefix.indexOf(" ") === -1) {
             COMMON_COMMANDS.forEach(function (c) {
-                if (c.indexOf(prefix) === 0) add(c);
+                if (c.indexOf(prefix) === 0) add(c, c);
             });
         }
-        return out.slice(0, 8);
+        if (serverCompletions.line === prefix && serverCompletions.candidates.length) {
+            var lastSpace = prefix.lastIndexOf(" ");
+            var head = lastSpace >= 0 ? prefix.slice(0, lastSpace + 1) : "";
+            serverCompletions.candidates.forEach(function (cand) {
+                add(cand, head + cand);
+            });
+        }
+        return out.slice(0, 12);
     }
 
     function setAutocompleteVisible(visible) {
@@ -900,13 +960,13 @@ document.addEventListener("DOMContentLoaded", function () {
             setAutocompleteVisible(false);
             return;
         }
-        var suggestions = getSuggestions(currentLine);
-        if (suggestions.length === 0) {
+        var items = buildItems();
+        if (items.length === 0) {
             setAutocompleteVisible(false);
             return;
         }
-        autocompleteBar.innerHTML = suggestions.map(function (s) {
-            return '<button class="ac-chip" type="button">' + escapeHtml(s) + "</button>";
+        autocompleteBar.innerHTML = items.map(function (it) {
+            return '<button class="ac-chip" type="button" data-ac-value="' + escapeHtml(it.insert) + '">' + escapeHtml(it.display) + "</button>";
         }).join("");
         setAutocompleteVisible(true);
     }
@@ -939,14 +999,14 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!chip || acMoved) return;
             e.preventDefault();
             acSuppressClickUntil = Date.now() + 400;
-            applyAutocomplete(chip.textContent);
+            applyAutocomplete(chip.getAttribute("data-ac-value"));
         });
         autocompleteBar.addEventListener("click", function (e) {
             var chip = e.target.closest(".ac-chip");
             if (!chip) return;
             e.preventDefault();
             if (Date.now() < acSuppressClickUntil) return;
-            applyAutocomplete(chip.textContent);
+            applyAutocomplete(chip.getAttribute("data-ac-value"));
         });
     }
 
