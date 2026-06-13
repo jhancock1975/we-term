@@ -203,7 +203,8 @@ html, body {
     font-size: 16px;
     line-height: 1;
     cursor: pointer;
-    touch-action: manipulation;
+    /* none (not manipulation) so a glide drag isn't stolen as a pan/scroll */
+    touch-action: none;
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;

@@ -1287,6 +1287,9 @@ document.addEventListener("DOMContentLoaded", function () {
     function isSubsequence(word, pathKeys) {
         var pi = 0;
         for (var ci = 0; ci < word.length; ci++) {
+            // A doubled letter in the word maps to a single path key, since a
+            // glide collapses consecutive identical keys (g-o-o-d -> g,o,d).
+            if (ci > 0 && word[ci] === word[ci - 1]) continue;
             while (pi < pathKeys.length && pathKeys[pi] !== word[ci]) pi++;
             if (pi >= pathKeys.length) return false;
             pi++;

@@ -43,6 +43,13 @@ test("matcher: endpoints filter - path g-o-o-d returns 'good' but not 'the'", as
     await context.close();
 });
 
+test("matcher: a deduped path g-o-d (as a real glide produces) still yields 'good'", async ({ browser }) => {
+    const { context, page } = await ready(browser);
+    const result = await page.evaluate(() => window.__glideCandidates(["g","o","d"], window.GLIDE_WORDS));
+    expect(result).toContain("good");
+    await context.close();
+});
+
 test("matcher: returns at most 3 candidates", async ({ browser }) => {
     const { context, page } = await ready(browser);
     const result = await page.evaluate(() => window.__glideCandidates(
