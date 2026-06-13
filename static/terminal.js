@@ -69,6 +69,9 @@ document.addEventListener("DOMContentLoaded", function () {
     var activeTouchPreviewKey = null;
     var glidePath = [];
     var gliding = false;
+    // Glide is single-pointer: we latch the pointerId that started a glide and
+    // ignore all other pointers, so a second finger/palm can't corrupt the path.
+    var glidePointerId = null;
     var glideCandidatesList = [];
     var glideSuppressClickUntil = 0;
 
@@ -903,6 +906,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function trackAutocompleteInput(data) {
+        // Any real keystroke invalidates stale glide suggestions: dismiss them.
         if (glideCandidatesList.length) { glideCandidatesList = []; }
         if (!autocompleteActive() || !data) return;
         if (data.charCodeAt(0) === 0x1b) {
@@ -1048,6 +1052,14 @@ document.addEventListener("DOMContentLoaded", function () {
         renderAutocomplete();
     }
 
+    // Dispatch a tapped autocomplete-bar chip: glide-word chips win over
+    // ordinary completion chips. Shared by the bar's touchend and click handlers.
+    function applyChip(chip) {
+        var glideVal = chip.getAttribute("data-glide-value");
+        if (glideVal !== null) { applyGlideWord(glideVal); return; }
+        applyAutocomplete(chip.getAttribute("data-ac-value"));
+    }
+
     if (autocompleteBar) {
         var acTouchX = 0;
         var acTouchY = 0;
@@ -1067,18 +1079,14 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!chip || acMoved) return;
             e.preventDefault();
             acSuppressClickUntil = Date.now() + 400;
-            var glideVal = chip.getAttribute("data-glide-value");
-            if (glideVal !== null) { applyGlideWord(glideVal); return; }
-            applyAutocomplete(chip.getAttribute("data-ac-value"));
+            applyChip(chip);
         });
         autocompleteBar.addEventListener("click", function (e) {
             var chip = e.target.closest(".ac-chip");
             if (!chip) return;
             e.preventDefault();
             if (Date.now() < acSuppressClickUntil) return;
-            var glideVal = chip.getAttribute("data-glide-value");
-            if (glideVal !== null) { applyGlideWord(glideVal); return; }
-            applyAutocomplete(chip.getAttribute("data-ac-value"));
+            applyChip(chip);
         });
 
         // Detect password/passphrase prompts from terminal output as it renders.
@@ -1626,17 +1634,21 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             showTouchKeyPreview(btn);
             var k = btn.getAttribute("data-touch-key");
-            if (settings.glideTyping && autocompleteActive() && /^[a-z]$/.test(k)) {
+            // Only arm a glide when none is already in progress; a second pointer
+            // landing mid-glide must not hijack or reset the active gesture.
+            if (glidePointerId === null && settings.glideTyping && autocompleteActive() && /^[a-z]$/.test(k)) {
                 glidePath = [k];
                 gliding = false;
-            } else {
+                glidePointerId = e.pointerId;
+            } else if (glidePointerId === null) {
                 glidePath = [];
                 gliding = false;
+                glidePointerId = null;
             }
         });
 
         touchKeyboardEl.addEventListener("pointermove", function (e) {
-            if (!glidePath.length || !settings.glideTyping || !autocompleteActive()) {
+            if (e.pointerId !== glidePointerId || !glidePath.length || !settings.glideTyping || !autocompleteActive()) {
                 return;
             }
             var el = document.elementFromPoint(e.clientX, e.clientY);
@@ -1655,7 +1667,11 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         });
 
-        function finishGlide() {
+        function finishGlide(e) {
+            // Only the pointer that started the glide may finish/reset it.
+            if (e && e.pointerId !== glidePointerId) {
+                return;
+            }
             if (gliding) {
                 glideCandidatesList = glideCandidates(glidePath, window.GLIDE_WORDS || []);
                 glideSuppressClickUntil = Date.now() + 500;
@@ -1663,16 +1679,27 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             glidePath = [];
             gliding = false;
+            glidePointerId = null;
             hideTouchKeyPreview();
         }
 
         touchKeyboardEl.addEventListener("pointerup", finishGlide);
-        touchKeyboardEl.addEventListener("pointercancel", function () {
+        touchKeyboardEl.addEventListener("pointercancel", function (e) {
+            // Ignore cancels from non-glide pointers so they can't reset an active glide.
+            if (e.pointerId !== glidePointerId) {
+                return;
+            }
             glidePath = [];
             gliding = false;
+            glidePointerId = null;
             hideTouchKeyPreview();
         });
         touchKeyboardEl.addEventListener("pointerleave", function (e) {
+            // While a glide pointer is actively down, a stray finger leaving the
+            // keyboard bounds must NOT wipe the in-progress glide.
+            if (glidePointerId !== null) {
+                return;
+            }
             if (activeTouchPreviewKey && !touchKeyboardEl.contains(e.relatedTarget)) {
                 glidePath = [];
                 gliding = false;
