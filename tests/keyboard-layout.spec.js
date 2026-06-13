@@ -40,3 +40,15 @@ test("Space is the widest key on its row", async ({ browser }) => {
     expect(space.width).toBeGreaterThan(esc.width);
     await context.close();
 });
+
+test("Every key meets the 44px minimum touch height", async ({ browser }) => {
+    const { context, page } = await openKeyboard(browser);
+    const heights = await page.locator("#touch-keyboard .touch-key").evaluateAll(
+        (els) => els.map((e) => e.getBoundingClientRect().height)
+    );
+    expect(heights.length).toBeGreaterThan(20);
+    for (const h of heights) {
+        expect(h).toBeGreaterThanOrEqual(44);
+    }
+    await context.close();
+});
