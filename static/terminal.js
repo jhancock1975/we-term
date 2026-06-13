@@ -69,11 +69,21 @@ document.addEventListener("DOMContentLoaded", function () {
     var activeTouchPreviewKey = null;
     var glidePath = [];
     var gliding = false;
-    // Glide is single-pointer: we latch the pointerId that started a glide and
-    // ignore all other pointers, so a second finger/palm can't corrupt the path.
-    var glidePointerId = null;
     var glideCandidatesList = [];
-    var glideSuppressClickUntil = 0;
+    // --- Unified touch lifecycle state for the on-screen keyboard ---
+    // Tap latency on iOS comes from the synthetic `click` (tap-delay +
+    // double-tap coalescing). We drive the keyboard off raw touch events
+    // instead and keep `click` only as a desktop-dev fallback, suppressed
+    // after any touch via kbdSuppressClickUntil.
+    var kbdTouchId = null;          // identifier of the active touch
+    var kbdStartKeyEl = null;       // .touch-key the touch started on
+    var kbdStartKey = null;         // its data-touch-key name
+    var kbdKeyFired = false;        // typematic already emitted this press
+    var kbdHoldTimer = null;        // 500ms hold-to-repeat arming timer
+    var kbdRepeatTimer = null;      // typematic setInterval id
+    var kbdSuppressClickUntil = 0;  // ignore synthetic click until this time
+    var KBD_HOLD_MS = 500;
+    var KBD_REPEAT_MS = 500;
 
     // --- Custom blinking cursor overlay ---
     // xterm only renders its own cursor element while its textarea is focused.
@@ -1617,8 +1627,171 @@ document.addEventListener("DOMContentLoaded", function () {
             longPressTriggered = false;
         }, { passive: true, capture: true });
 
+        // --- Unified touch lifecycle (iOS) ---
+        // The keyboard is driven by raw touch events rather than `click`.
+        // `click` on iOS carries tap-delay and double-tap coalescing, which
+        // caused typing lag, dropping the first of two fast keys, and flaky
+        // glide. `touchend` fires immediately, so taps register instantly and
+        // glide/typematic share one gesture pipeline.
+
+        // Mode/modifier keys mutate the layout rather than emit output, so
+        // repeating them makes no sense. Everything else (letters, digits,
+        // punctuation, space/enter/backspace/escape/tab) is repeatable.
+        function isRepeatableKey(keyName) {
+            return keyName !== "shift" && keyName !== "symbols" && keyName !== "letters";
+        }
+
+        function clearKbdTimers() {
+            if (kbdHoldTimer) {
+                clearTimeout(kbdHoldTimer);
+                kbdHoldTimer = null;
+            }
+            if (kbdRepeatTimer) {
+                clearInterval(kbdRepeatTimer);
+                kbdRepeatTimer = null;
+            }
+        }
+
+        function resetKbdTouch() {
+            clearKbdTimers();
+            kbdTouchId = null;
+            kbdStartKeyEl = null;
+            kbdStartKey = null;
+            kbdKeyFired = false;
+            glidePath = [];
+            gliding = false;
+        }
+
+        function keyElAtPoint(x, y) {
+            var el = document.elementFromPoint(x, y);
+            return el && el.closest ? el.closest(".touch-key") : null;
+        }
+
+        touchKeyboardEl.addEventListener("touchstart", function (e) {
+            // A second touch landing mid-press cancels the press (no
+            // multitouch typing); single-touch only.
+            if (!e.touches || e.touches.length !== 1) {
+                resetKbdTouch();
+                hideTouchKeyPreview();
+                return;
+            }
+            var touch = e.changedTouches[0];
+            var btn = e.target.closest ? e.target.closest(".touch-key") : null;
+            if (!btn) {
+                btn = keyElAtPoint(touch.clientX, touch.clientY);
+            }
+            if (!btn) {
+                return;
+            }
+            // Passive-friendly: no preventDefault here so the gesture stays
+            // smooth; the synthetic click is suppressed at touchend instead.
+            var key = btn.getAttribute("data-touch-key");
+            kbdTouchId = touch.identifier;
+            kbdStartKeyEl = btn;
+            kbdStartKey = key;
+            kbdKeyFired = false;
+            showTouchKeyPreview(btn);
+
+            // Arm a glide when conditions are met.
+            if (settings.glideTyping && autocompleteActive() && /^[a-z]$/.test(key)) {
+                glidePath = [key];
+                gliding = false;
+            } else {
+                glidePath = [];
+                gliding = false;
+            }
+
+            // Typematic: after a hold, repeatedly fire the key. A moving
+            // finger (glide) cancels this in touchmove.
+            if (isRepeatableKey(key)) {
+                kbdHoldTimer = setTimeout(function () {
+                    kbdHoldTimer = null;
+                    if (kbdTouchId === null || gliding) {
+                        return;
+                    }
+                    handleTouchKeyboardAction(key);
+                    kbdKeyFired = true;
+                    kbdRepeatTimer = setInterval(function () {
+                        handleTouchKeyboardAction(key);
+                    }, KBD_REPEAT_MS);
+                }, KBD_HOLD_MS);
+            }
+        }, { passive: true });
+
+        touchKeyboardEl.addEventListener("touchmove", function (e) {
+            if (kbdTouchId === null) {
+                return;
+            }
+            var touch = null;
+            for (var i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === kbdTouchId) {
+                    touch = e.changedTouches[i];
+                    break;
+                }
+            }
+            if (!touch) {
+                return;
+            }
+            var btn = keyElAtPoint(touch.clientX, touch.clientY);
+            var key = btn ? btn.getAttribute("data-touch-key") : null;
+
+            // A moving finger is not a held key: as soon as it leaves the
+            // start key (or all keys), cancel hold/typematic.
+            if (key !== kbdStartKey) {
+                clearKbdTimers();
+            }
+
+            // Glide tracking.
+            if (glidePath.length && settings.glideTyping && autocompleteActive() && key && /^[a-z]$/.test(key)) {
+                if (key !== glidePath[glidePath.length - 1]) {
+                    glidePath.push(key);
+                    gliding = glidePath.length >= 2;
+                    showTouchKeyPreview(btn);
+                }
+            }
+        }, { passive: true });
+
+        touchKeyboardEl.addEventListener("touchend", function (e) {
+            if (kbdTouchId === null) {
+                return;
+            }
+            var matched = false;
+            for (var i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === kbdTouchId) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                return;
+            }
+            clearKbdTimers();
+            // Suppress the synthetic click that follows this touch.
+            e.preventDefault();
+            kbdSuppressClickUntil = Date.now() + 500;
+
+            if (gliding) {
+                // A real glide: surface candidates, do not emit a key.
+                glideCandidatesList = glideCandidates(glidePath, window.GLIDE_WORDS || []);
+                renderAutocomplete();
+            } else if (!kbdKeyFired && kbdStartKey !== null) {
+                // A plain tap. If typematic already fired (kbdKeyFired), the
+                // key was emitted by the interval, so we must NOT emit again.
+                handleTouchKeyboardAction(kbdStartKey);
+            }
+            resetKbdTouch();
+            hideTouchKeyPreview();
+        }, { passive: false });
+
+        touchKeyboardEl.addEventListener("touchcancel", function () {
+            resetKbdTouch();
+            hideTouchKeyPreview();
+        }, { passive: true });
+
+        // Desktop-dev fallback only: a synthetic click types the key, but is
+        // suppressed for 500ms after any touch so iOS never double-fires.
         touchKeyboardEl.addEventListener("click", function (e) {
-            if (Date.now() < glideSuppressClickUntil) {
+            if (Date.now() < kbdSuppressClickUntil) {
                 e.preventDefault();
                 return;
             }
@@ -1628,86 +1801,6 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             e.preventDefault();
             handleTouchKeyboardAction(btn.getAttribute("data-touch-key"));
-        });
-
-        touchKeyboardEl.addEventListener("pointerdown", function (e) {
-            var btn = e.target.closest(".touch-key");
-            if (!btn) {
-                return;
-            }
-            showTouchKeyPreview(btn);
-            var k = btn.getAttribute("data-touch-key");
-            // Only arm a glide when none is already in progress; a second pointer
-            // landing mid-glide must not hijack or reset the active gesture.
-            if (glidePointerId === null && settings.glideTyping && autocompleteActive() && /^[a-z]$/.test(k)) {
-                glidePath = [k];
-                gliding = false;
-                glidePointerId = e.pointerId;
-            } else if (glidePointerId === null) {
-                glidePath = [];
-                gliding = false;
-                glidePointerId = null;
-            }
-        });
-
-        touchKeyboardEl.addEventListener("pointermove", function (e) {
-            if (e.pointerId !== glidePointerId || !glidePath.length || !settings.glideTyping || !autocompleteActive()) {
-                return;
-            }
-            var el = document.elementFromPoint(e.clientX, e.clientY);
-            var btn = el && el.closest ? el.closest(".touch-key") : null;
-            if (!btn) {
-                return;
-            }
-            var k = btn.getAttribute("data-touch-key");
-            if (!/^[a-z]$/.test(k)) {
-                return;
-            }
-            if (k !== glidePath[glidePath.length - 1]) {
-                glidePath.push(k);
-                gliding = glidePath.length >= 2;
-                showTouchKeyPreview(btn);
-            }
-        });
-
-        function finishGlide(e) {
-            // Only the pointer that started the glide may finish/reset it.
-            if (e && e.pointerId !== glidePointerId) {
-                return;
-            }
-            if (gliding) {
-                glideCandidatesList = glideCandidates(glidePath, window.GLIDE_WORDS || []);
-                glideSuppressClickUntil = Date.now() + 500;
-                renderAutocomplete();
-            }
-            glidePath = [];
-            gliding = false;
-            glidePointerId = null;
-            hideTouchKeyPreview();
-        }
-
-        touchKeyboardEl.addEventListener("pointerup", finishGlide);
-        touchKeyboardEl.addEventListener("pointercancel", function (e) {
-            // Ignore cancels from non-glide pointers so they can't reset an active glide.
-            if (e.pointerId !== glidePointerId) {
-                return;
-            }
-            glidePath = [];
-            gliding = false;
-            glidePointerId = null;
-            hideTouchKeyPreview();
-        });
-        touchKeyboardEl.addEventListener("pointerleave", function (e) {
-            // While a glide pointer is actively down, a stray finger leaving the
-            // keyboard bounds must NOT wipe the in-progress glide.
-            if (glidePointerId !== null) {
-                return;
-            }
-            if (activeTouchPreviewKey && !touchKeyboardEl.contains(e.relatedTarget)) {
-                glidePath = [];
-                gliding = false;
-                hideTouchKeyPreview();
-            }
         });
     }
 

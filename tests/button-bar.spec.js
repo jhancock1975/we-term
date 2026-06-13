@@ -230,12 +230,37 @@ test("Touch keyboard shows popout preview and honors haptic setting", async ({ b
     await page.locator("#terminal .xterm-screen").tap();
     await page.waitForTimeout(200);
 
+    // The on-screen keyboard runs on a touch lifecycle: the popout preview
+    // appears on touchstart and is dismissed on touchend. Drive it with real
+    // touch events. Playwright-WebKit cannot construct a TouchEvent in-page,
+    // so guard that engine (the preview logic is identical across engines and
+    // is exercised on chromium here).
+    var canTouch = await page.evaluate(() => {
+        try { new TouchEvent("touchstart", { changedTouches: [] }); return true; }
+        catch (e) { return false; }
+    });
+    if (canTouch) {
+        var box = await page.locator('[data-touch-key="a"]').boundingBox();
+        var ax = Math.round(box.x + box.width / 2);
+        var ay = Math.round(box.y + box.height / 2);
+        await page.evaluate(function (p) {
+            var el = document.elementFromPoint(p.x, p.y);
+            var t = new Touch({ identifier: 1, target: el, clientX: p.x, clientY: p.y });
+            el.dispatchEvent(new TouchEvent("touchstart", { cancelable: true, bubbles: true, touches: [t], targetTouches: [t], changedTouches: [t] }));
+            window.__previewEl = el;
+            window.__previewTouch = t;
+        }, { x: ax, y: ay });
+        await expect(page.locator("#touch-key-preview")).not.toHaveClass(/hidden/, { timeout: 2000 });
+        await expect(page.locator("#touch-key-preview")).toHaveText("a");
+        await page.evaluate(function () {
+            var el = window.__previewEl;
+            var t = window.__previewTouch;
+            el.dispatchEvent(new TouchEvent("touchend", { cancelable: true, bubbles: true, touches: [], targetTouches: [], changedTouches: [t] }));
+        });
+        await expect(page.locator("#touch-key-preview")).toHaveClass(/hidden/, { timeout: 2000 });
+    }
+
     var key = page.locator('[data-touch-key="a"]');
-    await key.dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true, button: 0, buttons: 1 });
-    await expect(page.locator("#touch-key-preview")).not.toHaveClass(/hidden/, { timeout: 2000 });
-    await expect(page.locator("#touch-key-preview")).toHaveText("a");
-    await key.dispatchEvent("pointerup", { pointerType: "touch", isPrimary: true, button: 0, buttons: 0 });
-    await expect(page.locator("#touch-key-preview")).toHaveClass(/hidden/, { timeout: 2000 });
 
     await page.evaluate(() => {
         window.__wsSent = [];
