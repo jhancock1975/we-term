@@ -1238,6 +1238,43 @@ document.addEventListener("DOMContentLoaded", function () {
         return keyDef.char;
     }
 
+    // Glide typing: map an ordered list of crossed keys to up to 3 dictionary
+    // words. A glide word starts and ends at the path endpoints and its letters
+    // appear in order somewhere along the path. Ranked by frequency (list order).
+    function isSubsequence(word, pathKeys) {
+        var pi = 0;
+        for (var ci = 0; ci < word.length; ci++) {
+            while (pi < pathKeys.length && pathKeys[pi] !== word[ci]) pi++;
+            if (pi >= pathKeys.length) return false;
+            pi++;
+        }
+        return true;
+    }
+
+    function glideCandidates(pathKeys, words) {
+        if (!pathKeys || pathKeys.length < 2 || !words || !words.length) {
+            return [];
+        }
+        var first = pathKeys[0];
+        var last = pathKeys[pathKeys.length - 1];
+        var pathLen = pathKeys.length;
+        var scored = [];
+        for (var w = 0; w < words.length; w++) {
+            var word = words[w];
+            if (word.length < 2) continue;
+            if (word[0] !== first || word[word.length - 1] !== last) continue;
+            if (!isSubsequence(word, pathKeys)) continue;
+            // Lower score is better: frequency rank + length-mismatch penalty.
+            var score = w + Math.abs(word.length - pathLen) * 50;
+            scored.push({ word: word, score: score });
+        }
+        scored.sort(function (a, b) { return a.score - b.score; });
+        return scored.slice(0, 3).map(function (s) { return s.word; });
+    }
+
+    // Exposed for tests.
+    window.__glideCandidates = glideCandidates;
+
     function renderTouchKeyboard() {
         if (!touchKeyboardEl) {
             return;
