@@ -67,6 +67,10 @@ document.addEventListener("DOMContentLoaded", function () {
     var shiftActive = false;
     var symbolMode = false;
     var activeTouchPreviewKey = null;
+    var glidePath = [];
+    var gliding = false;
+    var glideCandidatesList = [];
+    var glideSuppressClickUntil = 0;
 
     // --- Custom blinking cursor overlay ---
     // xterm only renders its own cursor element while its textarea is focused.
@@ -899,6 +903,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function trackAutocompleteInput(data) {
+        if (glideCandidatesList.length) { glideCandidatesList = []; }
         if (!autocompleteActive() || !data) return;
         if (data.charCodeAt(0) === 0x1b) {
             // Escape sequence (arrow keys, etc.) recalls/moves the shell line in
@@ -1013,6 +1018,13 @@ document.addEventListener("DOMContentLoaded", function () {
             setAutocompleteVisible(false);
             return;
         }
+        if (glideCandidatesList.length) {
+            autocompleteBar.innerHTML = glideCandidatesList.map(function (w) {
+                return '<button class="ac-chip ac-glide" type="button" data-glide-value="' + escapeHtml(w) + '">' + escapeHtml(w) + "</button>";
+            }).join("");
+            setAutocompleteVisible(true);
+            return;
+        }
         var items = currentLine.trim() ? buildItems() : recentHistoryItems();
         autocompleteBar.innerHTML = items.map(function (it) {
             return '<button class="ac-chip" type="button" data-ac-value="' + escapeHtml(it.insert) + '">' + escapeHtml(it.display) + "</button>";
@@ -1027,6 +1039,13 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         sendInput(erase + suggestion + " ");
         triggerHapticFeedback();
+    }
+
+    function applyGlideWord(word) {
+        glideCandidatesList = [];
+        sendInput(word + " ");
+        triggerHapticFeedback();
+        renderAutocomplete();
     }
 
     if (autocompleteBar) {
@@ -1048,6 +1067,8 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!chip || acMoved) return;
             e.preventDefault();
             acSuppressClickUntil = Date.now() + 400;
+            var glideVal = chip.getAttribute("data-glide-value");
+            if (glideVal !== null) { applyGlideWord(glideVal); return; }
             applyAutocomplete(chip.getAttribute("data-ac-value"));
         });
         autocompleteBar.addEventListener("click", function (e) {
@@ -1055,6 +1076,8 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!chip) return;
             e.preventDefault();
             if (Date.now() < acSuppressClickUntil) return;
+            var glideVal = chip.getAttribute("data-glide-value");
+            if (glideVal !== null) { applyGlideWord(glideVal); return; }
             applyAutocomplete(chip.getAttribute("data-ac-value"));
         });
 
@@ -1584,6 +1607,10 @@ document.addEventListener("DOMContentLoaded", function () {
         }, { passive: true, capture: true });
 
         touchKeyboardEl.addEventListener("click", function (e) {
+            if (Date.now() < glideSuppressClickUntil) {
+                e.preventDefault();
+                return;
+            }
             var btn = e.target.closest(".touch-key");
             if (!btn) {
                 return;
@@ -1598,12 +1625,57 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
             showTouchKeyPreview(btn);
+            var k = btn.getAttribute("data-touch-key");
+            if (settings.glideTyping && autocompleteActive() && /^[a-z]$/.test(k)) {
+                glidePath = [k];
+                gliding = false;
+            } else {
+                glidePath = [];
+                gliding = false;
+            }
         });
 
-        touchKeyboardEl.addEventListener("pointerup", hideTouchKeyPreview);
-        touchKeyboardEl.addEventListener("pointercancel", hideTouchKeyPreview);
+        touchKeyboardEl.addEventListener("pointermove", function (e) {
+            if (!glidePath.length || !settings.glideTyping || !autocompleteActive()) {
+                return;
+            }
+            var el = document.elementFromPoint(e.clientX, e.clientY);
+            var btn = el && el.closest ? el.closest(".touch-key") : null;
+            if (!btn) {
+                return;
+            }
+            var k = btn.getAttribute("data-touch-key");
+            if (!/^[a-z]$/.test(k)) {
+                return;
+            }
+            if (k !== glidePath[glidePath.length - 1]) {
+                glidePath.push(k);
+                gliding = glidePath.length >= 2;
+                showTouchKeyPreview(btn);
+            }
+        });
+
+        function finishGlide() {
+            if (gliding) {
+                glideCandidatesList = glideCandidates(glidePath, window.GLIDE_WORDS || []);
+                glideSuppressClickUntil = Date.now() + 500;
+                renderAutocomplete();
+            }
+            glidePath = [];
+            gliding = false;
+            hideTouchKeyPreview();
+        }
+
+        touchKeyboardEl.addEventListener("pointerup", finishGlide);
+        touchKeyboardEl.addEventListener("pointercancel", function () {
+            glidePath = [];
+            gliding = false;
+            hideTouchKeyPreview();
+        });
         touchKeyboardEl.addEventListener("pointerleave", function (e) {
             if (activeTouchPreviewKey && !touchKeyboardEl.contains(e.relatedTarget)) {
+                glidePath = [];
+                gliding = false;
                 hideTouchKeyPreview();
             }
         });
