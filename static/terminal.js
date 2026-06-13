@@ -2,7 +2,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var settingsStorageKey = "we-term-settings";
 
     function loadSettings() {
-        var defaults = { cursorBlink: true, hapticFeedback: true, systemKeyboard: false, autocomplete: true };
+        var defaults = { cursorBlink: true, hapticFeedback: true, systemKeyboard: false, autocomplete: true, glideTyping: true };
         try {
             var raw = localStorage.getItem(settingsStorageKey);
             if (!raw) {
@@ -14,6 +14,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 hapticFeedback: parsed.hapticFeedback !== false,
                 systemKeyboard: parsed.systemKeyboard === true,
                 autocomplete: parsed.autocomplete !== false,
+                glideTyping: parsed.glideTyping !== false,
             };
         } catch (err) {
             return defaults;
@@ -53,6 +54,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var hapticFeedbackToggle = document.getElementById("haptic-feedback-toggle");
     var systemKeyboardToggle = document.getElementById("system-keyboard-toggle");
     var autocompleteToggle = document.getElementById("autocomplete-toggle");
+    var glideTypingToggle = document.getElementById("glide-typing-toggle");
     var keyboardGearEl = document.getElementById("keyboard-gear");
     var helpOverlay = document.getElementById("help-overlay");
     var helpBtn = document.getElementById("help-btn");
@@ -258,6 +260,9 @@ document.addEventListener("DOMContentLoaded", function () {
         if (autocompleteToggle) {
             autocompleteToggle.checked = settings.autocomplete;
         }
+        if (glideTypingToggle) {
+            glideTypingToggle.checked = settings.glideTyping;
+        }
     }
 
     function closeSettingsPanel(skipFocus) {
@@ -304,6 +309,13 @@ document.addEventListener("DOMContentLoaded", function () {
             currentLine = "";
             serverCompletions = { line: null, candidates: [] };
             renderAutocomplete();
+        });
+    }
+
+    if (glideTypingToggle) {
+        glideTypingToggle.addEventListener("change", function () {
+            settings.glideTyping = glideTypingToggle.checked;
+            saveSettings(settings);
         });
     }
 

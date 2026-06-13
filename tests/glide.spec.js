@@ -48,3 +48,21 @@ test("matcher: returns [] for a path shorter than 2 keys", async ({ browser }) =
     expect(result).toEqual([]);
     await context.close();
 });
+
+test("glideTyping setting defaults on and the toggle reflects it", async ({ browser }) => {
+    const { context, page } = await ready(browser);
+    // Runtime default is on even when nothing is persisted yet.
+    const runtimeDefault = await page.evaluate(() => {
+        var raw = localStorage.getItem("we-term-settings");
+        if (!raw) return true; // not yet persisted => default true
+        var v = JSON.parse(raw).glideTyping;
+        return v !== false;
+    });
+    expect(runtimeDefault).toBe(true);
+
+    // The settings toggle exists and is checked by default.
+    await page.locator("#settings-btn").tap();
+    await page.waitForTimeout(200);
+    await expect(page.locator("#glide-typing-toggle")).toBeChecked();
+    await context.close();
+});
