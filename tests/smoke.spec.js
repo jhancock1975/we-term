@@ -168,7 +168,7 @@ test("Non-touch device: custom keyboard stays hidden", async ({ page }) => {
     await expect(page.locator("#touch-keyboard")).toHaveClass(/hidden/);
 });
 
-test("Touch device: Esc lives on the keyboard left of 1, not the button bar", async ({ browser }) => {
+test("Touch device: Esc lives on the keyboard bottom row, not the button bar", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var context = result.context;
     var page = result.page;
@@ -184,16 +184,19 @@ test("Touch device: Esc lives on the keyboard left of 1, not the button bar", as
     var barEsc = await page.locator('#button-bar [data-key="escape"]').count();
     expect(barEsc).toBe(0);
 
-    // Esc is on the keyboard, immediately left of the "1" key.
+    // Esc is on the keyboard's bottom row, immediately right of the Sym key
+    // and immediately left of Space.
     var positions = await page.evaluate(() => {
         var keys = Array.from(document.querySelectorAll('#touch-keyboard .touch-key'));
         return {
+            symIdx: keys.findIndex((k) => k.getAttribute("data-touch-key") === "symbols"),
             escIdx: keys.findIndex((k) => k.getAttribute("data-touch-key") === "escape"),
-            oneIdx: keys.findIndex((k) => k.getAttribute("data-touch-key") === "1"),
+            spaceIdx: keys.findIndex((k) => k.getAttribute("data-touch-key") === "space"),
         };
     });
     expect(positions.escIdx).toBeGreaterThanOrEqual(0);
-    expect(positions.oneIdx).toBe(positions.escIdx + 1);
+    expect(positions.symIdx).toBe(positions.escIdx - 1);
+    expect(positions.spaceIdx).toBe(positions.escIdx + 1);
 
     await context.close();
 });
