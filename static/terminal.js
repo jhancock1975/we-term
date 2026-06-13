@@ -1192,7 +1192,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     { key: "letters", label: "ABC", className: "wide" }, { char: "." }, { char: "," }, { char: "$" }, { char: "*" }, { char: "\"" }, { key: "backspace", label: "Bksp", className: "wide" },
                 ],
                 [
-                    { key: "letters", label: "ABC", className: "wide" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
+                    { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
                 ],
             ];
         }
