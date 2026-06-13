@@ -1712,6 +1712,12 @@ document.addEventListener("DOMContentLoaded", function () {
                     handleTouchKeyboardAction(key);
                     kbdKeyFired = true;
                     kbdRepeatTimer = setInterval(function () {
+                        // Belt-and-suspenders: if the press's touchend was ever
+                        // missed/coalesced, never let keystrokes auto-fire forever.
+                        if (kbdTouchId === null) {
+                            clearKbdTimers();
+                            return;
+                        }
                         handleTouchKeyboardAction(key);
                     }, KBD_REPEAT_MS);
                 }, KBD_HOLD_MS);
