@@ -124,6 +124,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var glidePath = [];
     var gliding = false;
     var glideCandidatesList = [];
+    var glideTrailEl = null;        // <canvas id="glide-trail"> overlay
+    var glideTrailPoints = [];      // {x,y} relative to the keyboard rect
     // --- Unified touch lifecycle state for the on-screen keyboard ---
     // Tap latency on iOS comes from the synthetic `click` (tap-delay +
     // double-tap coalescing). We drive the keyboard off raw touch events
@@ -1538,6 +1540,23 @@ document.addEventListener("DOMContentLoaded", function () {
             return "<div class=\"touch-keyboard-row\">" + keysHtml + "</div>";
         }).join("");
         touchKeyboardEl.innerHTML = html;
+        // Re-attach the glide-trail canvas: innerHTML above wiped it out.
+        ensureGlideTrailEl();
+    }
+
+    // Create the glide-trail canvas once and keep it as the last child of the
+    // keyboard (above the keys, below the key preview). Idempotent.
+    function ensureGlideTrailEl() {
+        if (!touchKeyboardEl) {
+            return;
+        }
+        if (!glideTrailEl) {
+            glideTrailEl = document.createElement("canvas");
+            glideTrailEl.id = "glide-trail";
+            glideTrailEl.className = "hidden";
+            glideTrailEl.setAttribute("aria-hidden", "true");
+        }
+        touchKeyboardEl.appendChild(glideTrailEl);
     }
 
     function showTouchKeyPreview(btn) {
@@ -1578,6 +1597,107 @@ document.addEventListener("DOMContentLoaded", function () {
         touchKeyPreviewEl.textContent = "";
     }
 
+    // --- Glide trail overlay ---
+    // A canvas the size of the keyboard, drawn on during a glide to trace the
+    // finger's path. DPR-aware so the curve is crisp on retina screens.
+
+    function sizeGlideTrail() {
+        if (!glideTrailEl || !touchKeyboardEl) {
+            return;
+        }
+        var dpr = window.devicePixelRatio || 1;
+        var w = touchKeyboardEl.clientWidth;
+        var h = touchKeyboardEl.clientHeight;
+        glideTrailEl.width = Math.round(w * dpr);
+        glideTrailEl.height = Math.round(h * dpr);
+        var ctx = glideTrailEl.getContext("2d");
+        // Reset any prior transform, then scale so we can draw in CSS pixels.
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function clearGlideTrail() {
+        if (!glideTrailEl) {
+            return;
+        }
+        var ctx = glideTrailEl.getContext("2d");
+        // Clear in device pixels regardless of the current transform.
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, glideTrailEl.width, glideTrailEl.height);
+        ctx.restore();
+    }
+
+    function hideGlideTrail() {
+        glideTrailPoints = [];
+        if (glideTrailEl) {
+            clearGlideTrail();
+            glideTrailEl.classList.add("hidden");
+        }
+        if (typeof window !== "undefined") {
+            window.__glideTrailLen = 0;
+        }
+    }
+
+    function startGlideTrail(x, y) {
+        if (!glideTrailEl) {
+            return;
+        }
+        glideTrailPoints = [{ x: x, y: y }];
+        sizeGlideTrail();
+        clearGlideTrail();
+        glideTrailEl.classList.remove("hidden");
+        if (typeof window !== "undefined") {
+            window.__glideTrailLen = glideTrailPoints.length;
+        }
+    }
+
+    function drawGlideTrail() {
+        if (!glideTrailEl || glideTrailPoints.length === 0) {
+            return;
+        }
+        var ctx = glideTrailEl.getContext("2d");
+        clearGlideTrail();
+        var pts = glideTrailPoints;
+        if (pts.length === 1) {
+            // A single point: draw a small dot so there's immediate feedback.
+            ctx.beginPath();
+            ctx.fillStyle = "rgba(96, 192, 255, 0.75)";
+            ctx.arc(pts[0].x, pts[0].y, 3, 0, Math.PI * 2);
+            ctx.fill();
+            return;
+        }
+        ctx.lineWidth = 6;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "rgba(96, 192, 255, 0.75)";
+        ctx.shadowColor = "rgba(96, 192, 255, 0.55)";
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        // Smooth the path with quadratic curves through the midpoints of each
+        // pair of points (Catmull-Rom-ish), then finish to the last point.
+        for (var i = 1; i < pts.length - 1; i++) {
+            var midX = (pts[i].x + pts[i + 1].x) / 2;
+            var midY = (pts[i].y + pts[i + 1].y) / 2;
+            ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
+        }
+        var last = pts[pts.length - 1];
+        ctx.lineTo(last.x, last.y);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+    }
+
+    function pushGlideTrailPoint(x, y) {
+        if (!glideTrailEl || glideTrailPoints.length === 0) {
+            return;
+        }
+        glideTrailPoints.push({ x: x, y: y });
+        drawGlideTrail();
+        if (typeof window !== "undefined") {
+            window.__glideTrailLen = glideTrailPoints.length;
+        }
+    }
+
     function setTouchKeyboardVisible(visible) {
         if (!touchKeyboardEnabled || !touchKeyboardEl) {
             return;
@@ -1608,6 +1728,7 @@ document.addEventListener("DOMContentLoaded", function () {
             glidePath = [];
             gliding = false;
             hideTouchKeyPreview();
+            hideGlideTrail();
         }
         renderTouchKeyboard();
         renderAutocomplete();
@@ -1859,6 +1980,7 @@ document.addEventListener("DOMContentLoaded", function () {
             kbdKeyFired = false;
             glidePath = [];
             gliding = false;
+            hideGlideTrail();
         }
 
         function keyElAtPoint(x, y) {
@@ -1895,9 +2017,13 @@ document.addEventListener("DOMContentLoaded", function () {
             if (settings.glideTyping && autocompleteActive() && /^[a-z]$/.test(key)) {
                 glidePath = [key];
                 gliding = false;
+                // Begin the finger-path trail at the touch's relative point.
+                var startRect = touchKeyboardEl.getBoundingClientRect();
+                startGlideTrail(touch.clientX - startRect.left, touch.clientY - startRect.top);
             } else {
                 glidePath = [];
                 gliding = false;
+                hideGlideTrail();
             }
 
             // Typematic: after a hold, repeatedly fire the key. A moving
@@ -1944,6 +2070,13 @@ document.addEventListener("DOMContentLoaded", function () {
             // start key (or all keys), cancel hold/typematic.
             if (key !== kbdStartKey) {
                 clearKbdTimers();
+            }
+
+            // Trace the finger path whenever a glide is armed, even between
+            // keys, so the trail stays smooth and continuous.
+            if (glidePath.length && settings.glideTyping && autocompleteActive()) {
+                var moveRect = touchKeyboardEl.getBoundingClientRect();
+                pushGlideTrailPoint(touch.clientX - moveRect.left, touch.clientY - moveRect.top);
             }
 
             // Glide tracking.
