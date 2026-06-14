@@ -522,12 +522,13 @@ html, body {
     -webkit-overflow-scrolling: touch;
     padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
     margin: 0;
+    background: #1e1e1e;
     font-family: var(--app-font);
     font-size: 14px;
-    line-height: 1.4;
+    line-height: 1;
     color: #d4d4d4;
-    white-space: pre-wrap;
-    word-break: break-all;
+    white-space: pre;
+    word-break: normal;
     user-select: text;
     -webkit-user-select: text;
 }
