@@ -3,10 +3,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Configurable button-bar buttons, in default display order. The settings
     // gear is a fixed element (always first) and is NOT part of this list. Esc
-    // sits immediately to the right of Ctrl.
+    // sits immediately to the left of Ctrl.
     var BAR_BUTTONS = [
-        { id: "ctrl", label: "Ctrl", attrs: { "data-modifier": "ctrl" }, cls: "modifier-btn" },
         { id: "escape", label: "Esc", attrs: { "data-key": "escape" } },
+        { id: "ctrl", label: "Ctrl", attrs: { "data-modifier": "ctrl" }, cls: "modifier-btn" },
         { id: "meta", label: "Meta", attrs: { "data-modifier": "meta" }, cls: "modifier-btn" },
         { id: "tab", label: "Tab", attrs: { "data-key": "tab" } },
         { id: "select", label: "Sel", attrs: { "data-action": "select" }, elId: "select-btn" },

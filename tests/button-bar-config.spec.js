@@ -39,7 +39,7 @@ async function newTouchPage(browser) {
     return { context: context, page: page };
 }
 
-test("Esc button sits immediately to the right of Ctrl in the button bar", async ({ browser }) => {
+test("Esc button sits immediately to the left of Ctrl in the button bar", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var context = result.context;
     var page = result.page;
@@ -53,7 +53,7 @@ test("Esc button sits immediately to the right of Ctrl in the button bar", async
     await expect(ctrl).toHaveCount(1);
     await expect(esc).toHaveCount(1);
 
-    // DOM order: Esc is the very next .bar-btn after Ctrl.
+    // DOM order: Esc is the very element before Ctrl.
     var order = await page.locator("#button-scroll .bar-btn").evaluateAll((btns) => {
         return btns.map(function (b) {
             return b.getAttribute("data-modifier") || b.getAttribute("data-key") || b.getAttribute("data-action");
@@ -61,13 +61,13 @@ test("Esc button sits immediately to the right of Ctrl in the button bar", async
     });
     var ctrlIdx = order.indexOf("ctrl");
     var escIdx = order.indexOf("escape");
-    expect(ctrlIdx).toBeGreaterThanOrEqual(0);
-    expect(escIdx).toBe(ctrlIdx + 1);
+    expect(escIdx).toBeGreaterThanOrEqual(0);
+    expect(ctrlIdx).toBe(escIdx + 1);
 
-    // Esc is positioned to the right of Ctrl on screen.
+    // Esc is positioned to the left of Ctrl on screen.
     var ctrlBox = await ctrl.boundingBox();
     var escBox = await esc.boundingBox();
-    expect(escBox.x).toBeGreaterThan(ctrlBox.x);
+    expect(escBox.x).toBeLessThan(ctrlBox.x);
 
     await context.close();
 });
