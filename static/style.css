@@ -136,7 +136,7 @@ html, body {
 /* The settings button is a gear glyph; render it a bit larger than the
    text labels on the other bar buttons. */
 #settings-btn {
-    font-size: 20px;
+    font-size: 25px;
     line-height: 1;
 }
 
@@ -216,6 +216,11 @@ html, body {
     background: #4a4a4a;
 }
 
+/* Backspace shows the ⌫ glyph; render it larger than the text-label keys. */
+.touch-key[data-touch-key="backspace"] {
+    font-size: 22px;
+}
+
 .touch-key.preview-source {
     transform: translateY(-1px) scale(1.04);
     background: #454545;
@@ -283,7 +288,7 @@ html, body {
     border: 1px solid #555;
     background: rgba(45, 45, 45, 0.92);
     color: #d4d4d4;
-    font-size: 20px;
+    font-size: 25px;
     line-height: 1;
     cursor: pointer;
     touch-action: manipulation;
@@ -373,6 +378,20 @@ html, body {
 .settings-option input {
     width: 18px;
     height: 18px;
+}
+
+.settings-section {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #3a3a3a;
+}
+
+.settings-section-title {
+    color: #9a9a9a;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 4px 0 2px;
 }
 
 .settings-link {
@@ -503,12 +522,13 @@ html, body {
     -webkit-overflow-scrolling: touch;
     padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
     margin: 0;
+    background: #1e1e1e;
     font-family: var(--app-font);
     font-size: 14px;
-    line-height: 1.4;
+    line-height: 1;
     color: #d4d4d4;
-    white-space: pre-wrap;
-    word-break: break-all;
+    white-space: pre;
+    word-break: normal;
     user-select: text;
     -webkit-user-select: text;
 }

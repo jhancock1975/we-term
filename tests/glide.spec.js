@@ -84,26 +84,71 @@ test("glideTyping setting defaults on and the toggle reflects it", async ({ brow
     await context.close();
 });
 
+// Dispatch a synthetic touch glide across the given letter keys.
+// Uses real TouchEvent dispatch so it exercises the touchstart/move/end
+// lifecycle (page.mouse.* does NOT fire touch events).
+async function touchGlide(page, chars) {
+    const pts = [];
+    for (const ch of chars) {
+        const b = await page.locator('#touch-keyboard [data-touch-key="' + ch + '"]').boundingBox();
+        pts.push({ x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) });
+    }
+    await page.evaluate((pts) => {
+        const kb = document.getElementById("touch-keyboard");
+        function mkTouch(x, y) {
+            const el = document.elementFromPoint(x, y) || kb;
+            // Prefer the real Touch constructor; fall back to a plain
+            // touch-like object literal for engines that lack it.
+            try {
+                return new Touch({ identifier: 1, target: el, clientX: x, clientY: y, pageX: x, pageY: y });
+            } catch (err) {
+                return { identifier: 1, target: el, clientX: x, clientY: y, pageX: x, pageY: y };
+            }
+        }
+        function fire(type, p) {
+            const t = mkTouch(p.x, p.y);
+            const empty = type === "touchend" || type === "touchcancel";
+            const ev = new TouchEvent(type, {
+                cancelable: true,
+                bubbles: true,
+                touches: empty ? [] : [t],
+                targetTouches: empty ? [] : [t],
+                changedTouches: [t],
+            });
+            (document.elementFromPoint(p.x, p.y) || kb).dispatchEvent(ev);
+        }
+        fire("touchstart", pts[0]);
+        for (let i = 1; i < pts.length; i++) fire("touchmove", pts[i]);
+        fire("touchend", pts[pts.length - 1]);
+    }, pts);
+}
+
+// Some engines in Playwright may not synthesize TouchEvent. Detect once.
+async function touchSupported(page) {
+    return await page.evaluate(() => {
+        try {
+            // eslint-disable-next-line no-new
+            new TouchEvent("touchstart", { changedTouches: [] });
+            return true;
+        } catch (err) {
+            return false;
+        }
+    });
+}
+
 test("gliding across t-h-e-n surfaces 'then' as a tappable suggestion that inserts on tap", async ({ browser }) => {
     const { context, page } = await ready(browser);
+    if (!(await touchSupported(page))) {
+        test.skip(true, "engine cannot synthesize TouchEvent; logic covered by matcher tests");
+        await context.close();
+        return;
+    }
     await page.waitForTimeout(400);
     await page.locator("#terminal .xterm-screen").tap();   // show keyboard
     await page.waitForTimeout(300);
     await expect(page.locator("#touch-keyboard")).not.toHaveClass(/hidden/);
 
-    async function centre(ch) {
-        const b = await page.locator('#touch-keyboard [data-touch-key="' + ch + '"]').boundingBox();
-        return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-    }
-    const pts = [];
-    for (const ch of ["t", "h", "e", "n"]) pts.push(await centre(ch));
-
-    await page.mouse.move(pts[0].x, pts[0].y);
-    await page.mouse.down();
-    for (const p of pts.slice(1)) {
-        await page.mouse.move(p.x, p.y, { steps: 8 });
-    }
-    await page.mouse.up();
+    await touchGlide(page, ["t", "h", "e", "n"]);
     await page.waitForTimeout(200);
 
     const chip = page.locator('#autocomplete-bar [data-glide-value="then"]');
@@ -113,5 +158,71 @@ test("gliding across t-h-e-n surfaces 'then' as a tappable suggestion that inser
     // 'then ' should have been sent to the shell.
     const sent = await page.evaluate(() => (window.__wsSent || []).join(""));
     expect(sent).toContain("then ");
+    await context.close();
+});
+
+test("typematic: holding a key fires it repeatedly", async ({ browser }) => {
+    const { context, page } = await ready(browser);
+    if (!(await touchSupported(page))) {
+        test.skip(true, "engine cannot synthesize TouchEvent; typematic is touch-only");
+        await context.close();
+        return;
+    }
+    await page.waitForTimeout(400);
+    await page.locator("#terminal .xterm-screen").tap();   // show keyboard
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-keyboard")).not.toHaveClass(/hidden/);
+
+    const b = await page.locator('#touch-keyboard [data-touch-key="a"]').boundingBox();
+    const x = Math.round(b.x + b.width / 2);
+    const y = Math.round(b.y + b.height / 2);
+
+    await page.evaluate(() => { window.__wsSent = []; });
+    // touchstart, hold (no end) past the 500ms hold + a couple repeats, then end.
+    await page.evaluate((pt) => {
+        const kb = document.getElementById("touch-keyboard");
+        const el = document.elementFromPoint(pt.x, pt.y) || kb;
+        let t;
+        try { t = new Touch({ identifier: 1, target: el, clientX: pt.x, clientY: pt.y }); }
+        catch (err) { t = { identifier: 1, target: el, clientX: pt.x, clientY: pt.y }; }
+        const ev = new TouchEvent("touchstart", { cancelable: true, bubbles: true, touches: [t], targetTouches: [t], changedTouches: [t] });
+        el.dispatchEvent(ev);
+        window.__typematicEl = el;
+        window.__typematicTouch = t;
+    }, { x, y });
+
+    await page.waitForTimeout(1300);
+
+    await page.evaluate(() => {
+        const el = window.__typematicEl;
+        const t = window.__typematicTouch;
+        const ev = new TouchEvent("touchend", { cancelable: true, bubbles: true, touches: [], targetTouches: [], changedTouches: [t] });
+        el.dispatchEvent(ev);
+    });
+    await page.waitForTimeout(100);
+
+    // WS frames are JSON {type:"input",data:"a"}; count how many carry "a".
+    const count = await page.evaluate(() => (window.__wsSent || []).filter(function (d) {
+        try { return JSON.parse(d).data === "a"; } catch (e) { return false; }
+    }).length);
+    expect(count).toBeGreaterThanOrEqual(2);
+    await context.close();
+});
+
+test("rapid taps on two different keys both reach the shell", async ({ browser }) => {
+    const { context, page } = await ready(browser);
+    await page.waitForTimeout(400);
+    await page.locator("#terminal .xterm-screen").tap();   // show keyboard
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-keyboard")).not.toHaveClass(/hidden/);
+
+    await page.evaluate(() => { window.__wsSent = []; });
+    await page.locator('#touch-keyboard [data-touch-key="a"]').tap();
+    await page.locator('#touch-keyboard [data-touch-key="b"]').tap();
+    await page.waitForTimeout(150);
+
+    const sent = await page.evaluate(() => (window.__wsSent || []).join(""));
+    expect(sent).toContain("a");
+    expect(sent).toContain("b");
     await context.close();
 });

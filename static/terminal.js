@@ -1,8 +1,56 @@
 document.addEventListener("DOMContentLoaded", function () {
     var settingsStorageKey = "we-term-settings";
 
+    // Configurable button-bar buttons, in default display order. The settings
+    // gear is a fixed element (always first) and is NOT part of this list. Esc
+    // sits immediately to the right of Ctrl.
+    var BAR_BUTTONS = [
+        { id: "ctrl", label: "Ctrl", attrs: { "data-modifier": "ctrl" }, cls: "modifier-btn" },
+        { id: "escape", label: "Esc", attrs: { "data-key": "escape" } },
+        { id: "meta", label: "Meta", attrs: { "data-modifier": "meta" }, cls: "modifier-btn" },
+        { id: "tab", label: "Tab", attrs: { "data-key": "tab" } },
+        { id: "select", label: "Sel", attrs: { "data-action": "select" }, elId: "select-btn" },
+        { id: "paste", label: "Paste", attrs: { "data-action": "paste" }, elId: "paste-btn" },
+        { id: "pageup", label: "PgUp", attrs: { "data-key": "pageup" } },
+        { id: "pagedown", label: "PgDn", attrs: { "data-key": "pagedown" } },
+        { id: "up", label: "▲", settingsLabel: "Up", attrs: { "data-key": "up" } },
+        { id: "down", label: "▼", settingsLabel: "Down", attrs: { "data-key": "down" } },
+        { id: "left", label: "◀", settingsLabel: "Left", attrs: { "data-key": "left" } },
+        { id: "right", label: "▶", settingsLabel: "Right", attrs: { "data-key": "right" } },
+    ];
+
+    function defaultBarButtonIds() {
+        return BAR_BUTTONS.map(function (b) { return b.id; });
+    }
+
+    function barButtonById(id) {
+        for (var i = 0; i < BAR_BUTTONS.length; i++) {
+            if (BAR_BUTTONS[i].id === id) {
+                return BAR_BUTTONS[i];
+            }
+        }
+        return null;
+    }
+
+    function normalizeButtonBar(value) {
+        if (!Array.isArray(value)) {
+            return defaultBarButtonIds();
+        }
+        // Keep only known ids, drop duplicates, preserve the stored order.
+        var seen = {};
+        var result = [];
+        for (var i = 0; i < value.length; i++) {
+            var id = value[i];
+            if (barButtonById(id) && !seen[id]) {
+                seen[id] = true;
+                result.push(id);
+            }
+        }
+        return result;
+    }
+
     function loadSettings() {
-        var defaults = { cursorBlink: true, hapticFeedback: true, systemKeyboard: false, autocomplete: true, glideTyping: true };
+        var defaults = { cursorBlink: true, hapticFeedback: true, systemKeyboard: false, autocomplete: true, glideTyping: true, buttonBar: defaultBarButtonIds() };
         try {
             var raw = localStorage.getItem(settingsStorageKey);
             if (!raw) {
@@ -15,6 +63,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 systemKeyboard: parsed.systemKeyboard === true,
                 autocomplete: parsed.autocomplete !== false,
                 glideTyping: parsed.glideTyping !== false,
+                buttonBar: Array.isArray(parsed.buttonBar) ? normalizeButtonBar(parsed.buttonBar) : defaultBarButtonIds(),
             };
         } catch (err) {
             return defaults;
@@ -69,11 +118,21 @@ document.addEventListener("DOMContentLoaded", function () {
     var activeTouchPreviewKey = null;
     var glidePath = [];
     var gliding = false;
-    // Glide is single-pointer: we latch the pointerId that started a glide and
-    // ignore all other pointers, so a second finger/palm can't corrupt the path.
-    var glidePointerId = null;
     var glideCandidatesList = [];
-    var glideSuppressClickUntil = 0;
+    // --- Unified touch lifecycle state for the on-screen keyboard ---
+    // Tap latency on iOS comes from the synthetic `click` (tap-delay +
+    // double-tap coalescing). We drive the keyboard off raw touch events
+    // instead and keep `click` only as a desktop-dev fallback, suppressed
+    // after any touch via kbdSuppressClickUntil.
+    var kbdTouchId = null;          // identifier of the active touch
+    var kbdStartKeyEl = null;       // .touch-key the touch started on
+    var kbdStartKey = null;         // its data-touch-key name
+    var kbdKeyFired = false;        // typematic already emitted this press
+    var kbdHoldTimer = null;        // 500ms hold-to-repeat arming timer
+    var kbdRepeatTimer = null;      // typematic setInterval id
+    var kbdSuppressClickUntil = 0;  // ignore synthetic click until this time
+    var KBD_HOLD_MS = 500;
+    var KBD_REPEAT_MS = 500;
 
     // --- Custom blinking cursor overlay ---
     // xterm only renders its own cursor element while its textarea is focused.
@@ -270,6 +329,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (glideTypingToggle) {
             glideTypingToggle.checked = settings.glideTyping;
         }
+        syncButtonBarOptions();
     }
 
     function closeSettingsPanel(skipFocus) {
@@ -325,6 +385,70 @@ document.addEventListener("DOMContentLoaded", function () {
             saveSettings(settings);
         });
     }
+
+    // --- Button-bar configuration UI ---
+    var buttonBarOptionsEl = document.getElementById("button-bar-options");
+
+    function setBarButtonEnabled(id, enabled) {
+        // Rebuild the enabled list preserving BAR_BUTTONS order, so toggling on
+        // a button restores it to its canonical position.
+        var enabledSet = {};
+        for (var i = 0; i < settings.buttonBar.length; i++) {
+            enabledSet[settings.buttonBar[i]] = true;
+        }
+        enabledSet[id] = enabled;
+        var next = [];
+        for (var j = 0; j < BAR_BUTTONS.length; j++) {
+            var bid = BAR_BUTTONS[j].id;
+            if (enabledSet[bid]) {
+                next.push(bid);
+            }
+        }
+        settings.buttonBar = next;
+        saveSettings(settings);
+        renderButtonBar();
+    }
+
+    function buildButtonBarOptions() {
+        if (!buttonBarOptionsEl) {
+            return;
+        }
+        while (buttonBarOptionsEl.firstChild) {
+            buttonBarOptionsEl.removeChild(buttonBarOptionsEl.firstChild);
+        }
+        BAR_BUTTONS.forEach(function (def) {
+            var label = document.createElement("label");
+            label.className = "settings-option";
+            var span = document.createElement("span");
+            span.textContent = def.settingsLabel || def.label;
+            var input = document.createElement("input");
+            input.type = "checkbox";
+            input.setAttribute("data-bar-toggle", def.id);
+            input.addEventListener("change", function () {
+                setBarButtonEnabled(def.id, input.checked);
+            });
+            label.appendChild(span);
+            label.appendChild(input);
+            buttonBarOptionsEl.appendChild(label);
+        });
+    }
+
+    function syncButtonBarOptions() {
+        if (!buttonBarOptionsEl) {
+            return;
+        }
+        var enabledSet = {};
+        for (var i = 0; i < settings.buttonBar.length; i++) {
+            enabledSet[settings.buttonBar[i]] = true;
+        }
+        var inputs = buttonBarOptionsEl.querySelectorAll("[data-bar-toggle]");
+        for (var j = 0; j < inputs.length; j++) {
+            var id = inputs[j].getAttribute("data-bar-toggle");
+            inputs[j].checked = !!enabledSet[id];
+        }
+    }
+
+    buildButtonBarOptions();
 
     // --- Keyboard gear (system-keyboard mode) ---
     // In system-keyboard mode the JS keyboard and its controls are hidden, so
@@ -967,9 +1091,41 @@ document.addEventListener("DOMContentLoaded", function () {
         }, 160);
     }
 
-    // Build the suggestion list: history + built-in commands (full-line) merged
-    // with server shell-completions (token-level). Each item carries the text
-    // to insert (the full resulting line) and a display label.
+    // Stem-aware dictionary suggestions for the last whitespace-delimited token.
+    // Returns up to ~6 word strings when the token "closely matches" English
+    // words from GLIDE_WORDS, else []. A word qualifies if it starts with the
+    // token, OR its stem equals the token's stem, OR the token's stem is a
+    // prefix of the word's stem. Ranked: prefix matches first, then stem
+    // matches, then GLIDE_WORDS frequency order. Empty when the token is under
+    // 2 chars, non-alphabetic, or has no qualifying words.
+    function wordCandidates(token) {
+        if (!token || token.length < 2 || !/^[a-z]+$/i.test(token)) return [];
+        if (typeof window.stemWord !== "function" || !window.GLIDE_WORDS) return [];
+        var t = token.toLowerCase();
+        var tStem = window.stemWord(t);
+        var scored = [];
+        window.GLIDE_WORDS.forEach(function (w, idx) {
+            if (w === t) return; // already typed; nothing to complete
+            var isPrefix = w.indexOf(t) === 0;
+            var wStem = window.stemWord(w);
+            var stemMatch = wStem === tStem || wStem.indexOf(tStem) === 0;
+            if (!isPrefix && !stemMatch) return;
+            // rank: prefix (0) before stem-only (1), then frequency (idx)
+            scored.push({ word: w, rank: isPrefix ? 0 : 1, idx: idx });
+        });
+        scored.sort(function (a, b) {
+            if (a.rank !== b.rank) return a.rank - b.rank;
+            return a.idx - b.idx;
+        });
+        return scored.slice(0, 6).map(function (s) { return s.word; });
+    }
+
+    // Build the suggestion list. When the last token closely matches English
+    // words, stem-aware word candidates lead the bar; the existing command
+    // sources (history full-line, built-in COMMON_COMMANDS at command
+    // position, server shell-completions token-level) follow, deduped. When
+    // there's no word match, behaves exactly as before. Each item carries the
+    // full resulting line to insert and a display label. Capped at 12.
     function buildItems() {
         var prefix = currentLine;
         var p = prefix.toLowerCase();
@@ -980,6 +1136,13 @@ document.addEventListener("DOMContentLoaded", function () {
             seen[insert] = 1;
             out.push({ display: display, insert: insert });
         }
+        var lastSpace = prefix.lastIndexOf(" ");
+        var head = lastSpace >= 0 ? prefix.slice(0, lastSpace + 1) : "";
+        var lastToken = lastSpace >= 0 ? prefix.slice(lastSpace + 1) : prefix;
+        var wc = wordCandidates(lastToken);
+        wc.forEach(function (w) {
+            add(w, head + w);
+        });
         commandHistory.forEach(function (h) {
             if (h.toLowerCase().indexOf(p) === 0) add(h, h);
         });
@@ -989,8 +1152,6 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         if (serverCompletions.line === prefix && serverCompletions.candidates.length) {
-            var lastSpace = prefix.lastIndexOf(" ");
-            var head = lastSpace >= 0 ? prefix.slice(0, lastSpace + 1) : "";
             serverCompletions.candidates.forEach(function (cand) {
                 add(cand, head + cand);
             });
@@ -1253,7 +1414,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 { key: "shift", label: "⇧", className: "wide" }, { char: "z" }, { char: "x" }, { char: "c" }, { char: "v" }, { char: "b" }, { char: "n" }, { char: "m" }, { char: ".", shiftChar: ">" }, { char: ",", shiftChar: "<" },
             ],
             [
-                { key: "symbols", label: "Sym", className: "wide" }, { key: "escape", label: "Esc" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
+                { key: "symbols", label: "Sym", className: "wide" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
             ],
         ];
     }
@@ -1398,6 +1559,21 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!visible) {
             shiftActive = false;
             symbolMode = false;
+            // Hiding the keyboard mid-hold must kill any typematic repeat, or
+            // the interval keeps typing into the shell with no key on screen.
+            if (kbdHoldTimer) {
+                clearTimeout(kbdHoldTimer);
+                kbdHoldTimer = null;
+            }
+            if (kbdRepeatTimer) {
+                clearInterval(kbdRepeatTimer);
+                kbdRepeatTimer = null;
+            }
+            kbdTouchId = null;
+            kbdStartKey = null;
+            kbdKeyFired = false;
+            glidePath = [];
+            gliding = false;
             hideTouchKeyPreview();
         }
         renderTouchKeyboard();
@@ -1617,8 +1793,177 @@ document.addEventListener("DOMContentLoaded", function () {
             longPressTriggered = false;
         }, { passive: true, capture: true });
 
+        // --- Unified touch lifecycle (iOS) ---
+        // The keyboard is driven by raw touch events rather than `click`.
+        // `click` on iOS carries tap-delay and double-tap coalescing, which
+        // caused typing lag, dropping the first of two fast keys, and flaky
+        // glide. `touchend` fires immediately, so taps register instantly and
+        // glide/typematic share one gesture pipeline.
+
+        // Mode/modifier keys mutate the layout rather than emit output, so
+        // repeating them makes no sense. Everything else (letters, digits,
+        // punctuation, space/enter/backspace/escape/tab) is repeatable.
+        function isRepeatableKey(keyName) {
+            return keyName !== "shift" && keyName !== "symbols" && keyName !== "letters";
+        }
+
+        function clearKbdTimers() {
+            if (kbdHoldTimer) {
+                clearTimeout(kbdHoldTimer);
+                kbdHoldTimer = null;
+            }
+            if (kbdRepeatTimer) {
+                clearInterval(kbdRepeatTimer);
+                kbdRepeatTimer = null;
+            }
+        }
+
+        function resetKbdTouch() {
+            clearKbdTimers();
+            kbdTouchId = null;
+            kbdStartKeyEl = null;
+            kbdStartKey = null;
+            kbdKeyFired = false;
+            glidePath = [];
+            gliding = false;
+        }
+
+        function keyElAtPoint(x, y) {
+            var el = document.elementFromPoint(x, y);
+            return el && el.closest ? el.closest(".touch-key") : null;
+        }
+
+        touchKeyboardEl.addEventListener("touchstart", function (e) {
+            // A second touch landing mid-press cancels the press (no
+            // multitouch typing); single-touch only.
+            if (!e.touches || e.touches.length !== 1) {
+                resetKbdTouch();
+                hideTouchKeyPreview();
+                return;
+            }
+            var touch = e.changedTouches[0];
+            var btn = e.target.closest ? e.target.closest(".touch-key") : null;
+            if (!btn) {
+                btn = keyElAtPoint(touch.clientX, touch.clientY);
+            }
+            if (!btn) {
+                return;
+            }
+            // Passive-friendly: no preventDefault here so the gesture stays
+            // smooth; the synthetic click is suppressed at touchend instead.
+            var key = btn.getAttribute("data-touch-key");
+            kbdTouchId = touch.identifier;
+            kbdStartKeyEl = btn;
+            kbdStartKey = key;
+            kbdKeyFired = false;
+            showTouchKeyPreview(btn);
+
+            // Arm a glide when conditions are met.
+            if (settings.glideTyping && autocompleteActive() && /^[a-z]$/.test(key)) {
+                glidePath = [key];
+                gliding = false;
+            } else {
+                glidePath = [];
+                gliding = false;
+            }
+
+            // Typematic: after a hold, repeatedly fire the key. A moving
+            // finger (glide) cancels this in touchmove.
+            if (isRepeatableKey(key)) {
+                kbdHoldTimer = setTimeout(function () {
+                    kbdHoldTimer = null;
+                    if (kbdTouchId === null || gliding) {
+                        return;
+                    }
+                    handleTouchKeyboardAction(key);
+                    kbdKeyFired = true;
+                    kbdRepeatTimer = setInterval(function () {
+                        // Belt-and-suspenders: if the press's touchend was ever
+                        // missed/coalesced, never let keystrokes auto-fire forever.
+                        if (kbdTouchId === null) {
+                            clearKbdTimers();
+                            return;
+                        }
+                        handleTouchKeyboardAction(key);
+                    }, KBD_REPEAT_MS);
+                }, KBD_HOLD_MS);
+            }
+        }, { passive: true });
+
+        touchKeyboardEl.addEventListener("touchmove", function (e) {
+            if (kbdTouchId === null) {
+                return;
+            }
+            var touch = null;
+            for (var i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === kbdTouchId) {
+                    touch = e.changedTouches[i];
+                    break;
+                }
+            }
+            if (!touch) {
+                return;
+            }
+            var btn = keyElAtPoint(touch.clientX, touch.clientY);
+            var key = btn ? btn.getAttribute("data-touch-key") : null;
+
+            // A moving finger is not a held key: as soon as it leaves the
+            // start key (or all keys), cancel hold/typematic.
+            if (key !== kbdStartKey) {
+                clearKbdTimers();
+            }
+
+            // Glide tracking.
+            if (glidePath.length && settings.glideTyping && autocompleteActive() && key && /^[a-z]$/.test(key)) {
+                if (key !== glidePath[glidePath.length - 1]) {
+                    glidePath.push(key);
+                    gliding = glidePath.length >= 2;
+                    showTouchKeyPreview(btn);
+                }
+            }
+        }, { passive: true });
+
+        touchKeyboardEl.addEventListener("touchend", function (e) {
+            if (kbdTouchId === null) {
+                return;
+            }
+            var matched = false;
+            for (var i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === kbdTouchId) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                return;
+            }
+            clearKbdTimers();
+            // Suppress the synthetic click that follows this touch.
+            e.preventDefault();
+            kbdSuppressClickUntil = Date.now() + 500;
+
+            if (gliding) {
+                // A real glide: surface candidates, do not emit a key.
+                glideCandidatesList = glideCandidates(glidePath, window.GLIDE_WORDS || []);
+                renderAutocomplete();
+            } else if (!kbdKeyFired && kbdStartKey !== null) {
+                // A plain tap. If typematic already fired (kbdKeyFired), the
+                // key was emitted by the interval, so we must NOT emit again.
+                handleTouchKeyboardAction(kbdStartKey);
+            }
+            resetKbdTouch();
+            hideTouchKeyPreview();
+        }, { passive: false });
+
+        touchKeyboardEl.addEventListener("touchcancel", function () {
+            resetKbdTouch();
+            hideTouchKeyPreview();
+        }, { passive: true });
+
+        // Desktop-dev fallback only: a synthetic click types the key, but is
+        // suppressed for 500ms after any touch so iOS never double-fires.
         touchKeyboardEl.addEventListener("click", function (e) {
-            if (Date.now() < glideSuppressClickUntil) {
+            if (Date.now() < kbdSuppressClickUntil) {
                 e.preventDefault();
                 return;
             }
@@ -1628,86 +1973,6 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             e.preventDefault();
             handleTouchKeyboardAction(btn.getAttribute("data-touch-key"));
-        });
-
-        touchKeyboardEl.addEventListener("pointerdown", function (e) {
-            var btn = e.target.closest(".touch-key");
-            if (!btn) {
-                return;
-            }
-            showTouchKeyPreview(btn);
-            var k = btn.getAttribute("data-touch-key");
-            // Only arm a glide when none is already in progress; a second pointer
-            // landing mid-glide must not hijack or reset the active gesture.
-            if (glidePointerId === null && settings.glideTyping && autocompleteActive() && /^[a-z]$/.test(k)) {
-                glidePath = [k];
-                gliding = false;
-                glidePointerId = e.pointerId;
-            } else if (glidePointerId === null) {
-                glidePath = [];
-                gliding = false;
-                glidePointerId = null;
-            }
-        });
-
-        touchKeyboardEl.addEventListener("pointermove", function (e) {
-            if (e.pointerId !== glidePointerId || !glidePath.length || !settings.glideTyping || !autocompleteActive()) {
-                return;
-            }
-            var el = document.elementFromPoint(e.clientX, e.clientY);
-            var btn = el && el.closest ? el.closest(".touch-key") : null;
-            if (!btn) {
-                return;
-            }
-            var k = btn.getAttribute("data-touch-key");
-            if (!/^[a-z]$/.test(k)) {
-                return;
-            }
-            if (k !== glidePath[glidePath.length - 1]) {
-                glidePath.push(k);
-                gliding = glidePath.length >= 2;
-                showTouchKeyPreview(btn);
-            }
-        });
-
-        function finishGlide(e) {
-            // Only the pointer that started the glide may finish/reset it.
-            if (e && e.pointerId !== glidePointerId) {
-                return;
-            }
-            if (gliding) {
-                glideCandidatesList = glideCandidates(glidePath, window.GLIDE_WORDS || []);
-                glideSuppressClickUntil = Date.now() + 500;
-                renderAutocomplete();
-            }
-            glidePath = [];
-            gliding = false;
-            glidePointerId = null;
-            hideTouchKeyPreview();
-        }
-
-        touchKeyboardEl.addEventListener("pointerup", finishGlide);
-        touchKeyboardEl.addEventListener("pointercancel", function (e) {
-            // Ignore cancels from non-glide pointers so they can't reset an active glide.
-            if (e.pointerId !== glidePointerId) {
-                return;
-            }
-            glidePath = [];
-            gliding = false;
-            glidePointerId = null;
-            hideTouchKeyPreview();
-        });
-        touchKeyboardEl.addEventListener("pointerleave", function (e) {
-            // While a glide pointer is actively down, a stray finger leaving the
-            // keyboard bounds must NOT wipe the in-progress glide.
-            if (glidePointerId !== null) {
-                return;
-            }
-            if (activeTouchPreviewKey && !touchKeyboardEl.contains(e.relatedTarget)) {
-                glidePath = [];
-                gliding = false;
-                hideTouchKeyPreview();
-            }
         });
     }
 
@@ -1756,7 +2021,7 @@ document.addEventListener("DOMContentLoaded", function () {
         focusTerminal();
     }
 
-    document.querySelectorAll(".bar-btn").forEach(function (btn) {
+    function bindBarButton(btn) {
         var touchStartX = 0;
         var touchStartY = 0;
 
@@ -1777,7 +2042,61 @@ document.addEventListener("DOMContentLoaded", function () {
             e.preventDefault();
             handleBtnAction(btn);
         });
-    });
+    }
+
+    // Render the configurable buttons (everything after the fixed settings
+    // gear) from settings.buttonBar, in stored order, and bind each one.
+    function renderButtonBar() {
+        var scroll = document.getElementById("button-scroll");
+        if (!scroll) {
+            return;
+        }
+        var gear = document.getElementById("settings-btn");
+        // Clear all children, then re-attach the gear first.
+        while (scroll.firstChild) {
+            scroll.removeChild(scroll.firstChild);
+        }
+        if (gear) {
+            scroll.appendChild(gear);
+        }
+        var ids = settings.buttonBar || defaultBarButtonIds();
+        for (var i = 0; i < ids.length; i++) {
+            var def = barButtonById(ids[i]);
+            if (!def) {
+                continue;
+            }
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "bar-btn" + (def.cls ? " " + def.cls : "");
+            if (def.elId) {
+                btn.id = def.elId;
+            }
+            for (var attr in def.attrs) {
+                if (Object.prototype.hasOwnProperty.call(def.attrs, attr)) {
+                    btn.setAttribute(attr, def.attrs[attr]);
+                }
+            }
+            btn.textContent = def.label;
+            // Preserve a latched modifier's visual active state across re-renders
+            // (e.g. toggling bar config while Ctrl/Meta is armed).
+            var modName = def.attrs && def.attrs["data-modifier"];
+            if (modName && modifiers[modName]) {
+                btn.classList.add("active");
+            }
+            scroll.appendChild(btn);
+            bindBarButton(btn);
+        }
+    }
+
+    // The fixed settings gear keeps the same binding logic as the rest.
+    (function () {
+        var gear = document.getElementById("settings-btn");
+        if (gear) {
+            bindBarButton(gear);
+        }
+    })();
+
+    renderButtonBar();
 
     syncCursorBlinkState();
     configureTouchKeyboard();

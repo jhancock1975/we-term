@@ -168,7 +168,7 @@ test("Non-touch device: custom keyboard stays hidden", async ({ page }) => {
     await expect(page.locator("#touch-keyboard")).toHaveClass(/hidden/);
 });
 
-test("Touch device: Esc lives on the keyboard bottom row, not the button bar", async ({ browser }) => {
+test("Touch device: Esc lives in the button bar (right of Ctrl), not on the keyboard", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var context = result.context;
     var page = result.page;
@@ -180,23 +180,23 @@ test("Touch device: Esc lives on the keyboard bottom row, not the button bar", a
     await page.locator("#terminal .xterm-screen").tap();
     await page.waitForTimeout(500);
 
-    // Esc was removed from the button bar.
+    // Esc lives in the button bar now, immediately to the right of Ctrl.
     var barEsc = await page.locator('#button-bar [data-key="escape"]').count();
-    expect(barEsc).toBe(0);
+    expect(barEsc).toBe(1);
 
-    // Esc is on the keyboard's bottom row, immediately right of the Sym key
-    // and immediately left of Space.
-    var positions = await page.evaluate(() => {
-        var keys = Array.from(document.querySelectorAll('#touch-keyboard .touch-key'));
-        return {
-            symIdx: keys.findIndex((k) => k.getAttribute("data-touch-key") === "symbols"),
-            escIdx: keys.findIndex((k) => k.getAttribute("data-touch-key") === "escape"),
-            spaceIdx: keys.findIndex((k) => k.getAttribute("data-touch-key") === "space"),
-        };
+    var order = await page.locator("#button-scroll .bar-btn").evaluateAll((btns) => {
+        return btns.map(function (b) {
+            return b.getAttribute("data-modifier") || b.getAttribute("data-key") || b.getAttribute("data-action");
+        });
     });
-    expect(positions.escIdx).toBeGreaterThanOrEqual(0);
-    expect(positions.symIdx).toBe(positions.escIdx - 1);
-    expect(positions.spaceIdx).toBe(positions.escIdx + 1);
+    var ctrlIdx = order.indexOf("ctrl");
+    var escIdx = order.indexOf("escape");
+    expect(ctrlIdx).toBeGreaterThanOrEqual(0);
+    expect(escIdx).toBe(ctrlIdx + 1);
+
+    // Esc was removed from the on-screen keyboard's letters mode.
+    var kbEsc = await page.locator('#touch-keyboard [data-touch-key="escape"]').count();
+    expect(kbEsc).toBe(0);
 
     await context.close();
 });

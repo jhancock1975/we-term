@@ -38,6 +38,10 @@
                 <span>Glide typing</span>
                 <input id="glide-typing-toggle" type="checkbox">
             </label>
+            <div class="settings-section">
+                <div class="settings-section-title">Button bar</div>
+                <div id="button-bar-options"></div>
+            </div>
             <button id="help-btn" class="settings-link" type="button">Help &mdash; how to use this app</button>
         </div>
     </div>
@@ -52,7 +56,7 @@
             <ul>
                 <li><strong>Sym</strong> switches to symbols; <strong>ABC</strong> switches back.</li>
                 <li><strong>Backspace</strong> is at the top&#8209;right; <strong>Shift</strong> is on the left.</li>
-                <li><strong>Esc</strong>, <strong>Space</strong>, and <strong>Enter</strong> are on the bottom row. <strong>Tab</strong> is in the button bar.</li>
+                <li><strong>Space</strong> and <strong>Enter</strong> are on the bottom row. <strong>Esc</strong> and <strong>Tab</strong> are in the button bar.</li>
             </ul>
 
             <h2>Button bar</h2>
@@ -76,6 +80,7 @@
                 <li><strong>Use system keyboard</strong> &mdash; use your device&#8217;s built&#8209;in keyboard instead of the on&#8209;screen one.</li>
                 <li><strong>Command completion</strong> &mdash; show the autocomplete suggestion bar.</li>
                 <li><strong>Glide typing</strong> &mdash; drag across the letters to glide&#8209;type a word; tap a suggestion to insert it.</li>
+                <li><strong>Button bar</strong> &mdash; choose which keys appear in the bar above the keyboard.</li>
             </ul>
 
             <h2>System keyboard</h2>
@@ -102,17 +107,6 @@
     <div id="button-bar">
         <div id="button-scroll">
             <button class="bar-btn" data-action="settings" id="settings-btn" aria-label="Settings">&#9881;</button>
-            <button class="bar-btn modifier-btn" data-modifier="ctrl">Ctrl</button>
-            <button class="bar-btn modifier-btn" data-modifier="meta">Meta</button>
-            <button class="bar-btn" data-key="tab">Tab</button>
-            <button class="bar-btn" data-action="select" id="select-btn">Sel</button>
-            <button class="bar-btn" data-action="paste" id="paste-btn">Paste</button>
-            <button class="bar-btn" data-key="pageup">PgUp</button>
-            <button class="bar-btn" data-key="pagedown">PgDn</button>
-            <button class="bar-btn" data-key="up">&#9650;</button>
-            <button class="bar-btn" data-key="down">&#9660;</button>
-            <button class="bar-btn" data-key="left">&#9664;</button>
-            <button class="bar-btn" data-key="right">&#9654;</button>
         </div>
     </div>
     <div id="touch-keyboard" class="hidden" aria-hidden="true"></div>
@@ -120,6 +114,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.js"></script>
     <script src="/static/glide-words.js"></script>
+    <script src="/static/stemmer.js"></script>
     <script src="/static/terminal.js"></script>
 </body>
 </html>
