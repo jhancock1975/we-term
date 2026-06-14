@@ -380,6 +380,20 @@ html, body {
     height: 18px;
 }
 
+.settings-section {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #3a3a3a;
+}
+
+.settings-section-title {
+    color: #9a9a9a;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 4px 0 2px;
+}
+
 .settings-link {
     display: block;
     width: 100%;

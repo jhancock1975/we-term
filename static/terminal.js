@@ -1,8 +1,56 @@
 document.addEventListener("DOMContentLoaded", function () {
     var settingsStorageKey = "we-term-settings";
 
+    // Configurable button-bar buttons, in default display order. The settings
+    // gear is a fixed element (always first) and is NOT part of this list. Esc
+    // sits immediately to the right of Ctrl.
+    var BAR_BUTTONS = [
+        { id: "ctrl", label: "Ctrl", attrs: { "data-modifier": "ctrl" }, cls: "modifier-btn" },
+        { id: "escape", label: "Esc", attrs: { "data-key": "escape" } },
+        { id: "meta", label: "Meta", attrs: { "data-modifier": "meta" }, cls: "modifier-btn" },
+        { id: "tab", label: "Tab", attrs: { "data-key": "tab" } },
+        { id: "select", label: "Sel", attrs: { "data-action": "select" }, elId: "select-btn" },
+        { id: "paste", label: "Paste", attrs: { "data-action": "paste" }, elId: "paste-btn" },
+        { id: "pageup", label: "PgUp", attrs: { "data-key": "pageup" } },
+        { id: "pagedown", label: "PgDn", attrs: { "data-key": "pagedown" } },
+        { id: "up", label: "▲", settingsLabel: "Up", attrs: { "data-key": "up" } },
+        { id: "down", label: "▼", settingsLabel: "Down", attrs: { "data-key": "down" } },
+        { id: "left", label: "◀", settingsLabel: "Left", attrs: { "data-key": "left" } },
+        { id: "right", label: "▶", settingsLabel: "Right", attrs: { "data-key": "right" } },
+    ];
+
+    function defaultBarButtonIds() {
+        return BAR_BUTTONS.map(function (b) { return b.id; });
+    }
+
+    function barButtonById(id) {
+        for (var i = 0; i < BAR_BUTTONS.length; i++) {
+            if (BAR_BUTTONS[i].id === id) {
+                return BAR_BUTTONS[i];
+            }
+        }
+        return null;
+    }
+
+    function normalizeButtonBar(value) {
+        if (!Array.isArray(value)) {
+            return defaultBarButtonIds();
+        }
+        // Keep only known ids, drop duplicates, preserve the stored order.
+        var seen = {};
+        var result = [];
+        for (var i = 0; i < value.length; i++) {
+            var id = value[i];
+            if (barButtonById(id) && !seen[id]) {
+                seen[id] = true;
+                result.push(id);
+            }
+        }
+        return result;
+    }
+
     function loadSettings() {
-        var defaults = { cursorBlink: true, hapticFeedback: true, systemKeyboard: false, autocomplete: true, glideTyping: true };
+        var defaults = { cursorBlink: true, hapticFeedback: true, systemKeyboard: false, autocomplete: true, glideTyping: true, buttonBar: defaultBarButtonIds() };
         try {
             var raw = localStorage.getItem(settingsStorageKey);
             if (!raw) {
@@ -15,6 +63,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 systemKeyboard: parsed.systemKeyboard === true,
                 autocomplete: parsed.autocomplete !== false,
                 glideTyping: parsed.glideTyping !== false,
+                buttonBar: Array.isArray(parsed.buttonBar) ? normalizeButtonBar(parsed.buttonBar) : defaultBarButtonIds(),
             };
         } catch (err) {
             return defaults;
@@ -280,6 +329,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (glideTypingToggle) {
             glideTypingToggle.checked = settings.glideTyping;
         }
+        syncButtonBarOptions();
     }
 
     function closeSettingsPanel(skipFocus) {
@@ -335,6 +385,70 @@ document.addEventListener("DOMContentLoaded", function () {
             saveSettings(settings);
         });
     }
+
+    // --- Button-bar configuration UI ---
+    var buttonBarOptionsEl = document.getElementById("button-bar-options");
+
+    function setBarButtonEnabled(id, enabled) {
+        // Rebuild the enabled list preserving BAR_BUTTONS order, so toggling on
+        // a button restores it to its canonical position.
+        var enabledSet = {};
+        for (var i = 0; i < settings.buttonBar.length; i++) {
+            enabledSet[settings.buttonBar[i]] = true;
+        }
+        enabledSet[id] = enabled;
+        var next = [];
+        for (var j = 0; j < BAR_BUTTONS.length; j++) {
+            var bid = BAR_BUTTONS[j].id;
+            if (enabledSet[bid]) {
+                next.push(bid);
+            }
+        }
+        settings.buttonBar = next;
+        saveSettings(settings);
+        renderButtonBar();
+    }
+
+    function buildButtonBarOptions() {
+        if (!buttonBarOptionsEl) {
+            return;
+        }
+        while (buttonBarOptionsEl.firstChild) {
+            buttonBarOptionsEl.removeChild(buttonBarOptionsEl.firstChild);
+        }
+        BAR_BUTTONS.forEach(function (def) {
+            var label = document.createElement("label");
+            label.className = "settings-option";
+            var span = document.createElement("span");
+            span.textContent = def.settingsLabel || def.label;
+            var input = document.createElement("input");
+            input.type = "checkbox";
+            input.setAttribute("data-bar-toggle", def.id);
+            input.addEventListener("change", function () {
+                setBarButtonEnabled(def.id, input.checked);
+            });
+            label.appendChild(span);
+            label.appendChild(input);
+            buttonBarOptionsEl.appendChild(label);
+        });
+    }
+
+    function syncButtonBarOptions() {
+        if (!buttonBarOptionsEl) {
+            return;
+        }
+        var enabledSet = {};
+        for (var i = 0; i < settings.buttonBar.length; i++) {
+            enabledSet[settings.buttonBar[i]] = true;
+        }
+        var inputs = buttonBarOptionsEl.querySelectorAll("[data-bar-toggle]");
+        for (var j = 0; j < inputs.length; j++) {
+            var id = inputs[j].getAttribute("data-bar-toggle");
+            inputs[j].checked = !!enabledSet[id];
+        }
+    }
+
+    buildButtonBarOptions();
 
     // --- Keyboard gear (system-keyboard mode) ---
     // In system-keyboard mode the JS keyboard and its controls are hidden, so
@@ -1263,7 +1377,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 { key: "shift", label: "⇧", className: "wide" }, { char: "z" }, { char: "x" }, { char: "c" }, { char: "v" }, { char: "b" }, { char: "n" }, { char: "m" }, { char: ".", shiftChar: ">" }, { char: ",", shiftChar: "<" },
             ],
             [
-                { key: "symbols", label: "Sym", className: "wide" }, { key: "escape", label: "Esc" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
+                { key: "symbols", label: "Sym", className: "wide" }, { key: "space", label: "Space", className: "extra-wide" }, { key: "enter", label: "Enter", className: "wide" },
             ],
         ];
     }
@@ -1855,7 +1969,7 @@ document.addEventListener("DOMContentLoaded", function () {
         focusTerminal();
     }
 
-    document.querySelectorAll(".bar-btn").forEach(function (btn) {
+    function bindBarButton(btn) {
         var touchStartX = 0;
         var touchStartY = 0;
 
@@ -1876,7 +1990,55 @@ document.addEventListener("DOMContentLoaded", function () {
             e.preventDefault();
             handleBtnAction(btn);
         });
-    });
+    }
+
+    // Render the configurable buttons (everything after the fixed settings
+    // gear) from settings.buttonBar, in stored order, and bind each one.
+    function renderButtonBar() {
+        var scroll = document.getElementById("button-scroll");
+        if (!scroll) {
+            return;
+        }
+        var gear = document.getElementById("settings-btn");
+        // Clear all children, then re-attach the gear first.
+        while (scroll.firstChild) {
+            scroll.removeChild(scroll.firstChild);
+        }
+        if (gear) {
+            scroll.appendChild(gear);
+        }
+        var ids = settings.buttonBar || defaultBarButtonIds();
+        for (var i = 0; i < ids.length; i++) {
+            var def = barButtonById(ids[i]);
+            if (!def) {
+                continue;
+            }
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "bar-btn" + (def.cls ? " " + def.cls : "");
+            if (def.elId) {
+                btn.id = def.elId;
+            }
+            for (var attr in def.attrs) {
+                if (Object.prototype.hasOwnProperty.call(def.attrs, attr)) {
+                    btn.setAttribute(attr, def.attrs[attr]);
+                }
+            }
+            btn.textContent = def.label;
+            scroll.appendChild(btn);
+            bindBarButton(btn);
+        }
+    }
+
+    // The fixed settings gear keeps the same binding logic as the rest.
+    (function () {
+        var gear = document.getElementById("settings-btn");
+        if (gear) {
+            bindBarButton(gear);
+        }
+    })();
+
+    renderButtonBar();
 
     syncCursorBlinkState();
     configureTouchKeyboard();

@@ -35,9 +35,11 @@ test("Space is the widest key on its row", async ({ browser }) => {
     const { context, page } = await openKeyboard(browser);
     const space = await page.locator('#touch-keyboard [data-touch-key="space"]').boundingBox();
     const enter = await page.locator('#touch-keyboard [data-touch-key="enter"]').boundingBox();
-    const esc = await page.locator('#touch-keyboard [data-touch-key="escape"]').boundingBox();
+    const sym = await page.locator('#touch-keyboard [data-touch-key="symbols"]').boundingBox();
+    // Esc no longer lives on the keyboard (it moved to the button bar).
+    await expect(page.locator('#touch-keyboard [data-touch-key="escape"]')).toHaveCount(0);
     expect(space.width).toBeGreaterThan(enter.width);
-    expect(space.width).toBeGreaterThan(esc.width);
+    expect(space.width).toBeGreaterThan(sym.width);
     await context.close();
 });
 
