@@ -113,6 +113,11 @@ document.addEventListener("DOMContentLoaded", function () {
     var touchKeyPreviewEl = document.getElementById("touch-key-preview");
     var touchKeyboardEnabled = isTouchKeyboardEnabled();
     var touchKeyboardVisible = false;
+    // Remembers whether the on-screen keyboard was showing before a select/paste
+    // overlay opened, so its prior shown/hidden state can be restored on close.
+    // Select and paste overlays are mutually exclusive, so one slot suffices.
+    var keyboardVisibleBeforeOverlay = false;
+    var inOverlay = false;
     var shiftActive = false;
     var symbolMode = false;
     var activeTouchPreviewKey = null;
@@ -765,8 +770,34 @@ document.addEventListener("DOMContentLoaded", function () {
         return Promise.resolve(legacyCopyText(text));
     }
 
-    function openSelectMode(clientX, clientY) {
+    // Save the keyboard's current visibility before an overlay hides it, then
+    // hide it. Capture only on the first overlay entry so a second open (which
+    // cannot happen normally) won't clobber the saved value with false.
+    function captureKeyboardForOverlay() {
+        if (!inOverlay) {
+            keyboardVisibleBeforeOverlay = touchKeyboardVisible;
+            inOverlay = true;
+        }
         setTouchKeyboardVisible(false);
+    }
+
+    // Restore the keyboard to whatever it was before the overlay opened. Never
+    // force-show the JS keyboard in system-keyboard mode (the OS keyboard owns
+    // input there); setTouchKeyboardVisible already no-ops when the JS keyboard
+    // is disabled, so this just adds the system-keyboard guard.
+    function restoreKeyboardAfterOverlay() {
+        if (!inOverlay) {
+            return;
+        }
+        inOverlay = false;
+        if (settings.systemKeyboard) {
+            return;
+        }
+        setTouchKeyboardVisible(keyboardVisibleBeforeOverlay);
+    }
+
+    function openSelectMode(clientX, clientY) {
+        captureKeyboardForOverlay();
         closeSettingsPanel(true);
         var lines = [];
         var renderedRows = termEl.querySelector(".xterm-rows");
@@ -821,6 +852,7 @@ document.addEventListener("DOMContentLoaded", function () {
         syncSelectState();
         selectOverlay.classList.add("hidden");
         selectContent.textContent = "";
+        restoreKeyboardAfterOverlay();
         focusTerminal();
     }
 
@@ -876,7 +908,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var pasteCancelBtn = document.getElementById("paste-cancel-btn");
 
     function openPasteMode() {
-        setTouchKeyboardVisible(false);
+        captureKeyboardForOverlay();
         closeSettingsPanel(true);
         pasteArea.value = "";
         pasteOverlay.classList.remove("hidden");
@@ -886,6 +918,7 @@ document.addEventListener("DOMContentLoaded", function () {
     function closePasteMode() {
         pasteOverlay.classList.add("hidden");
         pasteArea.value = "";
+        restoreKeyboardAfterOverlay();
         focusTerminal();
     }
 
