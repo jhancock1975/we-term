@@ -168,7 +168,7 @@ test("Non-touch device: custom keyboard stays hidden", async ({ page }) => {
     await expect(page.locator("#touch-keyboard")).toHaveClass(/hidden/);
 });
 
-test("Touch device: Esc lives in the button bar (right of Ctrl), not on the keyboard", async ({ browser }) => {
+test("Touch device: Esc lives in the button bar (left of Ctrl), not on the keyboard", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var context = result.context;
     var page = result.page;
@@ -180,7 +180,7 @@ test("Touch device: Esc lives in the button bar (right of Ctrl), not on the keyb
     await page.locator("#terminal .xterm-screen").tap();
     await page.waitForTimeout(500);
 
-    // Esc lives in the button bar now, immediately to the right of Ctrl.
+    // Esc lives in the button bar now, immediately to the left of Ctrl.
     var barEsc = await page.locator('#button-bar [data-key="escape"]').count();
     expect(barEsc).toBe(1);
 
@@ -191,8 +191,8 @@ test("Touch device: Esc lives in the button bar (right of Ctrl), not on the keyb
     });
     var ctrlIdx = order.indexOf("ctrl");
     var escIdx = order.indexOf("escape");
-    expect(ctrlIdx).toBeGreaterThanOrEqual(0);
-    expect(escIdx).toBe(ctrlIdx + 1);
+    expect(escIdx).toBeGreaterThanOrEqual(0);
+    expect(ctrlIdx).toBe(escIdx + 1);
 
     // Esc was removed from the on-screen keyboard's letters mode.
     var kbEsc = await page.locator('#touch-keyboard [data-touch-key="escape"]').count();
