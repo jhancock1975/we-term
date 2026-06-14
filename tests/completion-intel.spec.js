@@ -132,6 +132,60 @@ test("Word candidate replaces only the last token", async ({ browser }) => {
     await result.context.close();
 });
 
+test("Inflected forms from the big dictionary surface for 'swim'", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var page = result.page;
+    await gotoReady(page);
+
+    var words = await page.evaluate(() => window.__wordCandidates("swim"));
+    expect(words).toContain("swims");
+    expect(words).toContain("swimming");
+    expect(words).toContain("swimmer");
+
+    await result.context.close();
+});
+
+test("Inflected forms from the big dictionary surface for 'walk'", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var page = result.page;
+    await gotoReady(page);
+
+    var words = await page.evaluate(() => window.__wordCandidates("walk"));
+    expect(words).toContain("walks");
+    expect(words).toContain("walking");
+    expect(words).toContain("walked");
+
+    await result.context.close();
+});
+
+test("Shorter inflections rank before longer ones", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var page = result.page;
+    await gotoReady(page);
+
+    var words = await page.evaluate(() => window.__wordCandidates("swim"));
+    expect(words.indexOf("swims")).toBeLessThan(words.indexOf("swimming"));
+
+    await result.context.close();
+});
+
+test("Word candidate lookup is bounded and fast for a short token", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var page = result.page;
+    await gotoReady(page);
+
+    var info = await page.evaluate(() => {
+        var t0 = performance.now();
+        var words = window.__wordCandidates("s");
+        var dt = performance.now() - t0;
+        return { count: words.length, dt: dt };
+    });
+    expect(info.count).toBeLessThanOrEqual(8);
+    expect(info.dt).toBeLessThan(50);
+
+    await result.context.close();
+});
+
 test("Non-word command token falls back to command sources without spurious word chips", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var page = result.page;
@@ -141,7 +195,9 @@ test("Non-word command token falls back to command sources without spurious word
     await typeViaKeys(page, "systemctl\n");
     await page.waitForTimeout(300);
 
-    await typeViaKeys(page, "sys");
+    // "systemc" is not a prefix of any dictionary word, so no word chips
+    // compete with the seeded command.
+    await typeViaKeys(page, "systemc");
     await expect(page.locator("#autocomplete-bar")).not.toHaveClass(/hidden/, { timeout: 2000 });
 
     // The command chip appears...
