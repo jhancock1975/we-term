@@ -223,6 +223,34 @@ document.addEventListener("DOMContentLoaded", function () {
     var reconnectDelay = 500;
     var maxReconnectDelay = 5000;
     var currentDelay = reconnectDelay;
+    // Set from the server when the shell is reading hidden input (a password).
+    // Authoritative; suppresses all input tracking and suggestions. See
+    // setServerHiddenInput.
+    var serverHiddenInput = false;
+
+    // Terminal data arrives as binary frames; the server uses text frames only
+    // for JSON control messages (e.g. hidden-input state). Returns true if the
+    // frame was a recognized control message (and must NOT be written to the
+    // terminal).
+    function handleControlMessage(data) {
+        if (typeof data !== "string") {
+            return false;
+        }
+        var msg;
+        try {
+            msg = JSON.parse(data);
+        } catch (e) {
+            return false;
+        }
+        if (!msg || typeof msg !== "object") {
+            return false;
+        }
+        if (msg.type === "hidden") {
+            setServerHiddenInput(!!msg.value);
+            return true;
+        }
+        return false;
+    }
 
     function connectWs() {
         var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -237,7 +265,7 @@ document.addEventListener("DOMContentLoaded", function () {
         ws.addEventListener("message", function (event) {
             if (event.data instanceof ArrayBuffer) {
                 term.write(new Uint8Array(event.data));
-            } else {
+            } else if (!handleControlMessage(event.data)) {
                 term.write(event.data);
             }
         });
@@ -514,6 +542,13 @@ document.addEventListener("DOMContentLoaded", function () {
     if (helpBtn) {
         helpBtn.addEventListener("click", function () {
             openHelp();
+        });
+    }
+    var clearHistoryBtn = document.getElementById("clear-history-btn");
+    if (clearHistoryBtn) {
+        clearHistoryBtn.addEventListener("click", function () {
+            clearHistory();
+            showToast("Command history cleared");
         });
     }
     if (helpCloseBtn) {
@@ -1021,6 +1056,14 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
+    // Wipe all tracked command history (array + persisted copy). Lets the user
+    // purge anything sensitive that may have been captured.
+    function clearHistory() {
+        commandHistory.length = 0;
+        try { localStorage.removeItem(historyStorageKey); } catch (e) { /* ignore */ }
+        renderAutocomplete();
+    }
+
     function addToHistory(line) {
         line = (line || "").trim();
         if (!line) return;
@@ -1031,7 +1074,23 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function autocompleteActive() {
-        return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete && !passwordMode;
+        return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete && !passwordMode && !serverHiddenInput;
+    }
+
+    // Authoritative password/hidden-input signal from the server (derived from
+    // the tty's echo/canon flags). Far more reliable than scraping prompt text,
+    // so it's the primary defense; the prompt-text regex below is a fallback.
+    // On entering hidden mode we drop any partially-tracked line so keystrokes
+    // captured in the brief poll window before the signal arrived can't leak.
+    function setServerHiddenInput(value) {
+        if (serverHiddenInput === value) return;
+        serverHiddenInput = value;
+        if (value) {
+            currentLine = "";
+            serverCompletions = { line: null, candidates: [] };
+            glideCandidatesList = [];
+        }
+        renderAutocomplete();
     }
 
     // Never offer suggestions while a password/passphrase is being entered.

@@ -22,9 +22,11 @@ class PtySession:
         self.pid = None
         self.ws = None
         self.read_task = None
+        self.monitor_task = None
         self.alive = False
         self.buffer = bytearray()
         self.max_buffer = 64 * 1024
+        self.hidden_input = False
 
     def spawn(self):
         master_fd, slave_fd = pty.openpty()
@@ -49,6 +51,50 @@ class PtySession:
         self.pid = pid
         self.alive = True
         self.read_task = asyncio.create_task(self._read_pty())
+        self.monitor_task = asyncio.create_task(self._monitor_termios())
+
+    def _read_hidden_input(self):
+        """True when the slave tty is reading hidden input (a password).
+
+        A password read (getpass/sudo/ssh, bash `read -s`) puts the line
+        discipline in canonical mode with echo OFF (ICANON set, ECHO clear).
+        The interactive bash/readline prompt is the opposite — raw mode with
+        ICANON clear — so this reliably distinguishes a password prompt from
+        the normal prompt, where screen-scraping the prompt text does not.
+        """
+        if self.master_fd is None:
+            return False
+        try:
+            lflag = termios.tcgetattr(self.master_fd)[3]
+        except (OSError, termios.error):
+            return False
+        return not (lflag & termios.ECHO) and bool(lflag & termios.ICANON)
+
+    async def _send_control(self, obj):
+        if self.ws is not None and not self.ws.closed:
+            try:
+                await self.ws.send_str(json.dumps(obj))
+            except (ConnectionError, OSError):
+                pass
+
+    async def _monitor_termios(self):
+        """Poll the tty echo/canon state and push hidden-input transitions.
+
+        Polling (vs. an event) is necessary because termios changes aren't
+        select()-observable; tcgetattr is a cheap syscall so a ~120ms cadence
+        is negligible and still flips before the user can type a full secret.
+        """
+        try:
+            while self.alive:
+                hidden = self._read_hidden_input()
+                if hidden != self.hidden_input:
+                    self.hidden_input = hidden
+                    await self._send_control({"type": "hidden", "value": hidden})
+                await asyncio.sleep(0.12)
+        except asyncio.CancelledError:
+            raise
+        except OSError:
+            pass
 
     def is_alive(self):
         if not self.alive or self.pid is None:
@@ -69,6 +115,9 @@ class PtySession:
         if self.buffer:
             await ws.send_bytes(bytes(self.buffer))
             self.buffer.clear()
+
+        # Re-assert hidden-input state so a reconnect mid-password is safe.
+        await self._send_control({"type": "hidden", "value": self.hidden_input})
 
     def detach(self):
         self.ws = None
@@ -115,6 +164,9 @@ class PtySession:
         if self.read_task is not None:
             self.read_task.cancel()
             self.read_task = None
+        if self.monitor_task is not None:
+            self.monitor_task.cancel()
+            self.monitor_task = None
         if self.pid is not None:
             try:
                 os.kill(self.pid, signal.SIGTERM)
