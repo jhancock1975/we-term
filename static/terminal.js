@@ -544,13 +544,6 @@ document.addEventListener("DOMContentLoaded", function () {
             openHelp();
         });
     }
-    var clearHistoryBtn = document.getElementById("clear-history-btn");
-    if (clearHistoryBtn) {
-        clearHistoryBtn.addEventListener("click", function () {
-            clearHistory();
-            showToast("Command history cleared");
-        });
-    }
     if (helpCloseBtn) {
         helpCloseBtn.addEventListener("click", function () {
             closeHelp();
@@ -1020,8 +1013,18 @@ document.addEventListener("DOMContentLoaded", function () {
     // plus a trailing space. Only active in JS-keyboard mode (system-keyboard
     // input goes through xterm's textarea and isn't tracked here).
     var autocompleteBar = document.getElementById("autocomplete-bar");
-    var historyStorageKey = "we-term-history";
-    var commandHistory = loadHistory();
+    // Command history for suggestions comes from the SHELL's history file (via
+    // the server /history endpoint), never from persisted client keystrokes:
+    // passwords are never shell commands, so they cannot leak this way, and the
+    // user sees their real shell history. `sessionCommands` holds this session's
+    // just-entered commands so they appear immediately, before the shell flushes
+    // them to the file; it is in-memory only and never persisted.
+    var commandHistory = [];   // merged view used by the suggestion builders
+    var shellHistory = [];     // fetched from the server (HISTFILE)
+    var sessionCommands = [];  // entered this session; transient, not persisted
+    // Purge any legacy persisted history (may contain a secret captured before
+    // history moved server-side).
+    try { localStorage.removeItem("we-term-history"); } catch (e) { /* ignore */ }
     var currentLine = "";
     var autocompleteVisible = false;
     var acSuppressClickUntil = 0;
@@ -1038,40 +1041,58 @@ document.addEventListener("DOMContentLoaded", function () {
         "diff", "ln", "which", "date", "sleep",
     ];
 
-    function loadHistory() {
-        try {
-            var raw = localStorage.getItem(historyStorageKey);
-            var arr = raw ? JSON.parse(raw) : [];
-            return Array.isArray(arr) ? arr.slice(0, 100) : [];
-        } catch (e) {
-            return [];
+    // Merge this session's commands (most recent first) over the shell history,
+    // deduped, into the view the suggestion builders read.
+    function rebuildHistory() {
+        var out = [];
+        var seen = {};
+        function add(cmd) {
+            if (!cmd || seen[cmd]) return;
+            seen[cmd] = 1;
+            out.push(cmd);
         }
+        sessionCommands.forEach(add);
+        shellHistory.forEach(add);
+        commandHistory = out;
     }
 
-    function saveHistory() {
-        try {
-            localStorage.setItem(historyStorageKey, JSON.stringify(commandHistory.slice(0, 100)));
-        } catch (e) {
-            // ignore storage failures
-        }
+    // Pull the shell's history file from the server and refresh suggestions.
+    function refreshShellHistory() {
+        fetch("/history").then(function (r) {
+            return r.json();
+        }).then(function (data) {
+            shellHistory = (data && data.history) || [];
+            rebuildHistory();
+            renderAutocomplete();
+        }).catch(function () { /* best-effort */ });
     }
 
-    // Wipe all tracked command history (array + persisted copy). Lets the user
-    // purge anything sensitive that may have been captured.
-    function clearHistory() {
-        commandHistory.length = 0;
-        try { localStorage.removeItem(historyStorageKey); } catch (e) { /* ignore */ }
-        renderAutocomplete();
+    var historyRefreshTimer = null;
+    function scheduleHistoryRefresh() {
+        if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
+        // Give the shell a moment to flush the just-run command (PROMPT_COMMAND
+        // history -a) before re-reading the file.
+        historyRefreshTimer = setTimeout(refreshShellHistory, 350);
     }
 
+    // Record a command entered this session so it appears immediately; the
+    // authoritative copy lives in the shell history file. In-memory only.
     function addToHistory(line) {
         line = (line || "").trim();
         if (!line) return;
-        commandHistory = commandHistory.filter(function (h) { return h !== line; });
-        commandHistory.unshift(line);
-        if (commandHistory.length > 100) commandHistory.length = 100;
-        saveHistory();
+        sessionCommands = sessionCommands.filter(function (h) { return h !== line; });
+        sessionCommands.unshift(line);
+        if (sessionCommands.length > 100) sessionCommands.length = 100;
+        rebuildHistory();
     }
+
+    // Prime the shell history now and keep it fresh while the keyboard is in use.
+    refreshShellHistory();
+    setInterval(function () {
+        if (autocompleteActive() && touchKeyboardVisible) {
+            refreshShellHistory();
+        }
+    }, 8000);
 
     function autocompleteActive() {
         return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete && !passwordMode && !serverHiddenInput;
@@ -1140,6 +1161,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var code = data.charCodeAt(i);
             if (ch === "\r" || ch === "\n") {
                 addToHistory(currentLine);
+                scheduleHistoryRefresh();
                 currentLine = "";
             } else if (ch === "\x7f" || ch === "\b") {
                 currentLine = currentLine.slice(0, -1);

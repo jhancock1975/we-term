@@ -33,6 +33,15 @@ class PtySession:
 
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
+        # Flush each command to the history file as it's entered so the live
+        # session's history is readable immediately (best-effort; a user rc may
+        # override PROMPT_COMMAND). History suggestions are sourced from this
+        # file, never from client-side keystroke tracking.
+        existing_pc = env.get("PROMPT_COMMAND")
+        env["PROMPT_COMMAND"] = "history -a" + (";" + existing_pc if existing_pc else "")
+        env.setdefault("HISTFILE", os.path.join(os.path.expanduser("~"), ".bash_history"))
+        env["HISTSIZE"] = "5000"
+        env["HISTFILESIZE"] = "10000"
 
         pid = os.fork()
         if pid == 0:
@@ -327,6 +336,40 @@ def _run_compgen(mode, token, cwd):
         return []
 
 
+def _read_shell_history(limit=300):
+    """Recent shell commands, most-recent-first, deduped.
+
+    Read from the shell's HISTFILE so suggestions reflect real shell history
+    (everything typed at the shell) rather than client-tracked keystrokes.
+    Skips blank lines and bash timestamp comment lines (`#<epoch>`).
+    """
+    path = os.environ.get("HISTFILE") or os.path.join(
+        os.path.expanduser("~"), ".bash_history"
+    )
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    out = []
+    seen = set()
+    for line in reversed(lines):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def history_handler(request):
+    return web.json_response({"history": _read_shell_history()})
+
+
 async def complete_handler(request):
     try:
         data = await request.json()
@@ -356,6 +399,7 @@ app.router.add_get("/ws", websocket_handler)
 app.router.add_get("/", index_handler)
 app.router.add_post("/upload", upload_handler)
 app.router.add_post("/complete", complete_handler)
+app.router.add_get("/history", history_handler)
 app.router.add_static("/static", STATIC_DIR)
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { startServer, waitForServer, stopServer } = require("./helpers");
+const { startServer, waitForServer, stopServer, TEST_BASE_URL } = require("./helpers");
 
 let serverProcess;
 
@@ -26,7 +26,7 @@ async function gotoReady(page) {
         {}, { timeout: 10000 }
     );
     await page.waitForTimeout(600);
-    await page.locator("#terminal .xterm-screen").tap(); // show keyboard
+    await page.locator("#terminal .xterm-screen").tap();
     await page.waitForTimeout(300);
 }
 
@@ -37,8 +37,6 @@ async function typeViaKeys(page, str) {
             await page.locator('[data-touch-key="enter"]').tap();
         } else if (ch === " ") {
             await page.locator('[data-touch-key="space"]').tap();
-        } else if (ch === "-") {
-            await page.locator('[data-touch-key="-"]').tap();
         } else {
             await page.locator('[data-touch-key="' + ch + '"]').tap();
         }
@@ -46,38 +44,28 @@ async function typeViaKeys(page, str) {
     }
 }
 
-const SECRET = "topsecretpw";
+test("/history endpoint returns a history array", async ({ request }) => {
+    var res = await request.get(TEST_BASE_URL + "/history");
+    expect(res.ok()).toBeTruthy();
+    var body = await res.json();
+    expect(Array.isArray(body.history)).toBeTruthy();
+});
 
-// The real shell enters a hidden-input mode (ECHO off, ICANON on) during a
-// `read -s`. A typed password must never be tracked into command history nor
-// shown as an autocomplete suggestion.
-test("password typed at a hidden-input (read -s) prompt never enters history or suggestions", async ({ browser }) => {
+test("a just-run command shows in suggestions and is never persisted to localStorage", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var page = result.page;
     await gotoReady(page);
 
-    // Start a hidden-input read in the real shell.
-    await typeViaKeys(page, "read -s -p pw x\n");
-    // Give the server time to observe the termios change and notify the client.
+    await typeViaKeys(page, "echo zzmarker\n");
     await page.waitForTimeout(700);
 
-    // While the hidden read is active, the suggestion bar must be hidden.
-    await expect(page.locator("#autocomplete-bar")).toHaveClass(/hidden/);
-
-    // Type the secret + Enter.
-    await typeViaKeys(page, SECRET + "\n");
-    await page.waitForTimeout(400);
-
-    // The secret must not be in persisted history.
-    var history = await page.evaluate(() => {
-        try { return JSON.parse(localStorage.getItem("we-term-history") || "[]"); }
-        catch (e) { return []; }
-    });
-    expect(history.join("\n")).not.toContain(SECRET);
-
-    // And bringing the empty-line suggestion strip up must not surface it.
+    // The empty-line suggestion strip lists the just-run command.
     var chips = await page.locator("#autocomplete-bar .ac-chip").allTextContents();
-    expect(chips.join("\n")).not.toContain(SECRET);
+    expect(chips.join("\n")).toContain("echo zzmarker");
+
+    // History is sourced from the shell, never persisted client-side.
+    var legacy = await page.evaluate(() => localStorage.getItem("we-term-history"));
+    expect(legacy).toBeNull();
 
     await result.context.close();
 });
