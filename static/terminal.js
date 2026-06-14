@@ -3,10 +3,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Configurable button-bar buttons, in default display order. The settings
     // gear is a fixed element (always first) and is NOT part of this list. Esc
-    // sits immediately to the right of Ctrl.
+    // sits immediately to the left of Ctrl.
     var BAR_BUTTONS = [
-        { id: "ctrl", label: "Ctrl", attrs: { "data-modifier": "ctrl" }, cls: "modifier-btn" },
         { id: "escape", label: "Esc", attrs: { "data-key": "escape" } },
+        { id: "ctrl", label: "Ctrl", attrs: { "data-modifier": "ctrl" }, cls: "modifier-btn" },
         { id: "meta", label: "Meta", attrs: { "data-modifier": "meta" }, cls: "modifier-btn" },
         { id: "tab", label: "Tab", attrs: { "data-key": "tab" } },
         { id: "select", label: "Sel", attrs: { "data-action": "select" }, elId: "select-btn" },
@@ -113,12 +113,19 @@ document.addEventListener("DOMContentLoaded", function () {
     var touchKeyPreviewEl = document.getElementById("touch-key-preview");
     var touchKeyboardEnabled = isTouchKeyboardEnabled();
     var touchKeyboardVisible = false;
+    // Remembers whether the on-screen keyboard was showing before a select/paste
+    // overlay opened, so its prior shown/hidden state can be restored on close.
+    // Select and paste overlays are mutually exclusive, so one slot suffices.
+    var keyboardVisibleBeforeOverlay = false;
+    var inOverlay = false;
     var shiftActive = false;
     var symbolMode = false;
     var activeTouchPreviewKey = null;
     var glidePath = [];
     var gliding = false;
     var glideCandidatesList = [];
+    var glideTrailEl = null;        // <canvas id="glide-trail"> overlay
+    var glideTrailPoints = [];      // {x,y} relative to the keyboard rect
     // --- Unified touch lifecycle state for the on-screen keyboard ---
     // Tap latency on iOS comes from the synthetic `click` (tap-delay +
     // double-tap coalescing). We drive the keyboard off raw touch events
@@ -765,8 +772,34 @@ document.addEventListener("DOMContentLoaded", function () {
         return Promise.resolve(legacyCopyText(text));
     }
 
-    function openSelectMode(clientX, clientY) {
+    // Save the keyboard's current visibility before an overlay hides it, then
+    // hide it. Capture only on the first overlay entry so a second open (which
+    // cannot happen normally) won't clobber the saved value with false.
+    function captureKeyboardForOverlay() {
+        if (!inOverlay) {
+            keyboardVisibleBeforeOverlay = touchKeyboardVisible;
+            inOverlay = true;
+        }
         setTouchKeyboardVisible(false);
+    }
+
+    // Restore the keyboard to whatever it was before the overlay opened. Never
+    // force-show the JS keyboard in system-keyboard mode (the OS keyboard owns
+    // input there); setTouchKeyboardVisible already no-ops when the JS keyboard
+    // is disabled, so this just adds the system-keyboard guard.
+    function restoreKeyboardAfterOverlay() {
+        if (!inOverlay) {
+            return;
+        }
+        inOverlay = false;
+        if (settings.systemKeyboard) {
+            return;
+        }
+        setTouchKeyboardVisible(keyboardVisibleBeforeOverlay);
+    }
+
+    function openSelectMode(clientX, clientY) {
+        captureKeyboardForOverlay();
         closeSettingsPanel(true);
         var lines = [];
         var renderedRows = termEl.querySelector(".xterm-rows");
@@ -821,6 +854,7 @@ document.addEventListener("DOMContentLoaded", function () {
         syncSelectState();
         selectOverlay.classList.add("hidden");
         selectContent.textContent = "";
+        restoreKeyboardAfterOverlay();
         focusTerminal();
     }
 
@@ -876,7 +910,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var pasteCancelBtn = document.getElementById("paste-cancel-btn");
 
     function openPasteMode() {
-        setTouchKeyboardVisible(false);
+        captureKeyboardForOverlay();
         closeSettingsPanel(true);
         pasteArea.value = "";
         pasteOverlay.classList.remove("hidden");
@@ -886,6 +920,7 @@ document.addEventListener("DOMContentLoaded", function () {
     function closePasteMode() {
         pasteOverlay.classList.add("hidden");
         pasteArea.value = "";
+        restoreKeyboardAfterOverlay();
         focusTerminal();
     }
 
@@ -1091,33 +1126,92 @@ document.addEventListener("DOMContentLoaded", function () {
         }, 160);
     }
 
-    // Stem-aware dictionary suggestions for the last whitespace-delimited token.
-    // Returns up to ~6 word strings when the token "closely matches" English
-    // words from GLIDE_WORDS, else []. A word qualifies if it starts with the
-    // token, OR its stem equals the token's stem, OR the token's stem is a
-    // prefix of the word's stem. Ranked: prefix matches first, then stem
-    // matches, then GLIDE_WORDS frequency order. Empty when the token is under
-    // 2 chars, non-alphabetic, or has no qualifying words.
+    // Binary search over a sorted string array for the lower bound: the index
+    // of the first element >= target. O(log n).
+    function lowerBound(arr, target) {
+        var lo = 0;
+        var hi = arr.length;
+        while (lo < hi) {
+            var mid = (lo + hi) >> 1;
+            if (arr[mid] < target) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    // Build a quick lookup set of GLIDE_WORDS for the common-word ranking boost.
+    var GLIDE_SET = null;
+    function glideSet() {
+        if (GLIDE_SET) return GLIDE_SET;
+        GLIDE_SET = {};
+        var g = window.GLIDE_WORDS || [];
+        for (var i = 0; i < g.length; i++) GLIDE_SET[g[i]] = 1;
+        return GLIDE_SET;
+    }
+
+    // Dictionary suggestions for the last whitespace-delimited token. Returns up
+    // to ~8 word strings derived from / extending the token (swim -> swims,
+    // swimming, swimmer, swimsuit, ...), else []. Primary source is prefix
+    // matches found via binary search over the sorted window.DICTIONARY (falls
+    // back to GLIDE_WORDS if DICTIONARY is missing); a cheap stem pass over those
+    // same matches surfaces forms like "run" for "running" without a full scan.
+    // Ranked: shorter words first (frequency proxy), then GLIDE_WORDS-common
+    // words, then alphabetical. Empty when the token is under 2 chars or
+    // non-alphabetic.
     function wordCandidates(token) {
         if (!token || token.length < 2 || !/^[a-z]+$/i.test(token)) return [];
-        if (typeof window.stemWord !== "function" || !window.GLIDE_WORDS) return [];
         var t = token.toLowerCase();
-        var tStem = window.stemWord(t);
-        var scored = [];
-        window.GLIDE_WORDS.forEach(function (w, idx) {
-            if (w === t) return; // already typed; nothing to complete
-            var isPrefix = w.indexOf(t) === 0;
-            var wStem = window.stemWord(w);
-            var stemMatch = wStem === tStem || wStem.indexOf(tStem) === 0;
-            if (!isPrefix && !stemMatch) return;
-            // rank: prefix (0) before stem-only (1), then frequency (idx)
-            scored.push({ word: w, rank: isPrefix ? 0 : 1, idx: idx });
+        var dict = window.DICTIONARY || window.GLIDE_WORDS;
+        if (!dict || !dict.length) return [];
+
+        var words = [];
+        var seen = {};
+        var MAX_RAW = 40;
+
+        // Prefix matches via binary search + bounded forward scan. DICTIONARY is
+        // sorted; GLIDE_WORDS is not, so only the sorted dict gets the fast path.
+        if (window.DICTIONARY) {
+            var i = lowerBound(dict, t);
+            for (; i < dict.length && words.length < MAX_RAW; i++) {
+                var w = dict[i];
+                if (w.indexOf(t) !== 0) break; // past the prefix range
+                if (w === t || seen[w]) continue;
+                seen[w] = 1;
+                words.push(w);
+            }
+        } else {
+            for (var j = 0; j < dict.length && words.length < MAX_RAW; j++) {
+                var dw = dict[j];
+                if (dw.indexOf(t) !== 0 || dw === t || seen[dw]) continue;
+                seen[dw] = 1;
+                words.push(dw);
+            }
+        }
+
+        // Cheap stem pass: surface non-prefix forms (running -> run) from the
+        // small GLIDE_WORDS only. No full-dictionary stem scan.
+        if (typeof window.stemWord === "function" && window.GLIDE_WORDS) {
+            var tStem = window.stemWord(t);
+            var g = window.GLIDE_WORDS;
+            for (var k = 0; k < g.length && words.length < MAX_RAW; k++) {
+                var gw = g[k];
+                if (gw === t || seen[gw]) continue;
+                if (window.stemWord(gw) === tStem) {
+                    seen[gw] = 1;
+                    words.push(gw);
+                }
+            }
+        }
+
+        var gset = glideSet();
+        words.sort(function (a, b) {
+            if (a.length !== b.length) return a.length - b.length; // shorter first
+            var ga = gset[a] ? 0 : 1;
+            var gb = gset[b] ? 0 : 1;
+            if (ga !== gb) return ga - gb; // common words first
+            return a < b ? -1 : (a > b ? 1 : 0); // alphabetical
         });
-        scored.sort(function (a, b) {
-            if (a.rank !== b.rank) return a.rank - b.rank;
-            return a.idx - b.idx;
-        });
-        return scored.slice(0, 6).map(function (s) { return s.word; });
+        return words.slice(0, 8);
     }
 
     // Build the suggestion list. When the last token closely matches English
@@ -1481,6 +1575,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Exposed for tests.
     window.__glideCandidates = glideCandidates;
+    window.__wordCandidates = wordCandidates;
 
     function renderTouchKeyboard() {
         if (!touchKeyboardEl) {
@@ -1505,6 +1600,23 @@ document.addEventListener("DOMContentLoaded", function () {
             return "<div class=\"touch-keyboard-row\">" + keysHtml + "</div>";
         }).join("");
         touchKeyboardEl.innerHTML = html;
+        // Re-attach the glide-trail canvas: innerHTML above wiped it out.
+        ensureGlideTrailEl();
+    }
+
+    // Create the glide-trail canvas once and keep it as the last child of the
+    // keyboard (above the keys, below the key preview). Idempotent.
+    function ensureGlideTrailEl() {
+        if (!touchKeyboardEl) {
+            return;
+        }
+        if (!glideTrailEl) {
+            glideTrailEl = document.createElement("canvas");
+            glideTrailEl.id = "glide-trail";
+            glideTrailEl.className = "hidden";
+            glideTrailEl.setAttribute("aria-hidden", "true");
+        }
+        touchKeyboardEl.appendChild(glideTrailEl);
     }
 
     function showTouchKeyPreview(btn) {
@@ -1545,6 +1657,107 @@ document.addEventListener("DOMContentLoaded", function () {
         touchKeyPreviewEl.textContent = "";
     }
 
+    // --- Glide trail overlay ---
+    // A canvas the size of the keyboard, drawn on during a glide to trace the
+    // finger's path. DPR-aware so the curve is crisp on retina screens.
+
+    function sizeGlideTrail() {
+        if (!glideTrailEl || !touchKeyboardEl) {
+            return;
+        }
+        var dpr = window.devicePixelRatio || 1;
+        var w = touchKeyboardEl.clientWidth;
+        var h = touchKeyboardEl.clientHeight;
+        glideTrailEl.width = Math.round(w * dpr);
+        glideTrailEl.height = Math.round(h * dpr);
+        var ctx = glideTrailEl.getContext("2d");
+        // Reset any prior transform, then scale so we can draw in CSS pixels.
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function clearGlideTrail() {
+        if (!glideTrailEl) {
+            return;
+        }
+        var ctx = glideTrailEl.getContext("2d");
+        // Clear in device pixels regardless of the current transform.
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, glideTrailEl.width, glideTrailEl.height);
+        ctx.restore();
+    }
+
+    function hideGlideTrail() {
+        glideTrailPoints = [];
+        if (glideTrailEl) {
+            clearGlideTrail();
+            glideTrailEl.classList.add("hidden");
+        }
+        if (typeof window !== "undefined") {
+            window.__glideTrailLen = 0;
+        }
+    }
+
+    function startGlideTrail(x, y) {
+        if (!glideTrailEl) {
+            return;
+        }
+        glideTrailPoints = [{ x: x, y: y }];
+        sizeGlideTrail();
+        clearGlideTrail();
+        glideTrailEl.classList.remove("hidden");
+        if (typeof window !== "undefined") {
+            window.__glideTrailLen = glideTrailPoints.length;
+        }
+    }
+
+    function drawGlideTrail() {
+        if (!glideTrailEl || glideTrailPoints.length === 0) {
+            return;
+        }
+        var ctx = glideTrailEl.getContext("2d");
+        clearGlideTrail();
+        var pts = glideTrailPoints;
+        if (pts.length === 1) {
+            // A single point: draw a small dot so there's immediate feedback.
+            ctx.beginPath();
+            ctx.fillStyle = "rgba(96, 192, 255, 0.75)";
+            ctx.arc(pts[0].x, pts[0].y, 3, 0, Math.PI * 2);
+            ctx.fill();
+            return;
+        }
+        ctx.lineWidth = 6;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "rgba(96, 192, 255, 0.75)";
+        ctx.shadowColor = "rgba(96, 192, 255, 0.55)";
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        // Smooth the path with quadratic curves through the midpoints of each
+        // pair of points (Catmull-Rom-ish), then finish to the last point.
+        for (var i = 1; i < pts.length - 1; i++) {
+            var midX = (pts[i].x + pts[i + 1].x) / 2;
+            var midY = (pts[i].y + pts[i + 1].y) / 2;
+            ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
+        }
+        var last = pts[pts.length - 1];
+        ctx.lineTo(last.x, last.y);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+    }
+
+    function pushGlideTrailPoint(x, y) {
+        if (!glideTrailEl || glideTrailPoints.length === 0) {
+            return;
+        }
+        glideTrailPoints.push({ x: x, y: y });
+        drawGlideTrail();
+        if (typeof window !== "undefined") {
+            window.__glideTrailLen = glideTrailPoints.length;
+        }
+    }
+
     function setTouchKeyboardVisible(visible) {
         if (!touchKeyboardEnabled || !touchKeyboardEl) {
             return;
@@ -1575,6 +1788,7 @@ document.addEventListener("DOMContentLoaded", function () {
             glidePath = [];
             gliding = false;
             hideTouchKeyPreview();
+            hideGlideTrail();
         }
         renderTouchKeyboard();
         renderAutocomplete();
@@ -1826,6 +2040,7 @@ document.addEventListener("DOMContentLoaded", function () {
             kbdKeyFired = false;
             glidePath = [];
             gliding = false;
+            hideGlideTrail();
         }
 
         function keyElAtPoint(x, y) {
@@ -1862,9 +2077,13 @@ document.addEventListener("DOMContentLoaded", function () {
             if (settings.glideTyping && autocompleteActive() && /^[a-z]$/.test(key)) {
                 glidePath = [key];
                 gliding = false;
+                // Begin the finger-path trail at the touch's relative point.
+                var startRect = touchKeyboardEl.getBoundingClientRect();
+                startGlideTrail(touch.clientX - startRect.left, touch.clientY - startRect.top);
             } else {
                 glidePath = [];
                 gliding = false;
+                hideGlideTrail();
             }
 
             // Typematic: after a hold, repeatedly fire the key. A moving
@@ -1911,6 +2130,13 @@ document.addEventListener("DOMContentLoaded", function () {
             // start key (or all keys), cancel hold/typematic.
             if (key !== kbdStartKey) {
                 clearKbdTimers();
+            }
+
+            // Trace the finger path whenever a glide is armed, even between
+            // keys, so the trail stays smooth and continuous.
+            if (glidePath.length && settings.glideTyping && autocompleteActive()) {
+                var moveRect = touchKeyboardEl.getBoundingClientRect();
+                pushGlideTrailPoint(touch.clientX - moveRect.left, touch.clientY - moveRect.top);
             }
 
             // Glide tracking.

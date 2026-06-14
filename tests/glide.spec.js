@@ -161,6 +161,103 @@ test("gliding across t-h-e-n surfaces 'then' as a tappable suggestion that inser
     await context.close();
 });
 
+// Like touchGlide, but stops before touchend so the gesture is still
+// in-flight. Returns nothing; fire touchend separately via endGlide().
+async function touchGlideHold(page, chars) {
+    const pts = [];
+    for (const ch of chars) {
+        const b = await page.locator('#touch-keyboard [data-touch-key="' + ch + '"]').boundingBox();
+        pts.push({ x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) });
+    }
+    await page.evaluate((pts) => {
+        const kb = document.getElementById("touch-keyboard");
+        function mkTouch(x, y) {
+            const el = document.elementFromPoint(x, y) || kb;
+            try {
+                return new Touch({ identifier: 1, target: el, clientX: x, clientY: y, pageX: x, pageY: y });
+            } catch (err) {
+                return { identifier: 1, target: el, clientX: x, clientY: y, pageX: x, pageY: y };
+            }
+        }
+        function fire(type, p) {
+            const t = mkTouch(p.x, p.y);
+            const ev = new TouchEvent(type, {
+                cancelable: true, bubbles: true,
+                touches: [t], targetTouches: [t], changedTouches: [t],
+            });
+            (document.elementFromPoint(p.x, p.y) || kb).dispatchEvent(ev);
+        }
+        fire("touchstart", pts[0]);
+        for (let i = 1; i < pts.length; i++) fire("touchmove", pts[i]);
+        window.__lastGlidePt = pts[pts.length - 1];
+    }, pts);
+}
+
+async function endGlide(page) {
+    await page.evaluate(() => {
+        const kb = document.getElementById("touch-keyboard");
+        const p = window.__lastGlidePt;
+        let t;
+        try { t = new Touch({ identifier: 1, target: kb, clientX: p.x, clientY: p.y }); }
+        catch (err) { t = { identifier: 1, target: kb, clientX: p.x, clientY: p.y }; }
+        const ev = new TouchEvent("touchend", { cancelable: true, bubbles: true, touches: [], targetTouches: [], changedTouches: [t] });
+        (document.elementFromPoint(p.x, p.y) || kb).dispatchEvent(ev);
+    });
+}
+
+test("glide trail: canvas is created and starts hidden", async ({ browser }) => {
+    const { context, page } = await ready(browser);
+    await page.waitForTimeout(400);
+    await page.locator("#terminal .xterm-screen").tap();   // show keyboard
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-keyboard")).not.toHaveClass(/hidden/);
+    // The overlay exists as a child of the keyboard and starts hidden.
+    await expect(page.locator("#touch-keyboard #glide-trail")).toHaveCount(1);
+    await expect(page.locator("#glide-trail")).toHaveClass(/hidden/);
+    await context.close();
+});
+
+test("glide trail: visible during a glide, cleared after touchend", async ({ browser }) => {
+    const { context, page } = await ready(browser);
+    if (!(await touchSupported(page))) {
+        test.skip(true, "engine cannot synthesize TouchEvent; trail is touch-driven");
+        await context.close();
+        return;
+    }
+    await page.waitForTimeout(400);
+    await page.locator("#terminal .xterm-screen").tap();   // show keyboard
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-keyboard")).not.toHaveClass(/hidden/);
+
+    // Mid-glide: the trail is shown and has captured points.
+    await touchGlideHold(page, ["t", "h", "e", "n"]);
+    await page.waitForTimeout(100);
+    await expect(page.locator("#glide-trail")).not.toHaveClass(/hidden/);
+    const len = await page.evaluate(() => window.__glideTrailLen || 0);
+    expect(len).toBeGreaterThanOrEqual(2);
+
+    // After the finger lifts: hidden and points cleared.
+    await endGlide(page);
+    await page.waitForTimeout(100);
+    await expect(page.locator("#glide-trail")).toHaveClass(/hidden/);
+    const lenAfter = await page.evaluate(() => window.__glideTrailLen || 0);
+    expect(lenAfter).toBe(0);
+    await context.close();
+});
+
+test("glide trail: a plain tap never shows the trail", async ({ browser }) => {
+    const { context, page } = await ready(browser);
+    await page.waitForTimeout(400);
+    await page.locator("#terminal .xterm-screen").tap();   // show keyboard
+    await page.waitForTimeout(300);
+    await expect(page.locator("#touch-keyboard")).not.toHaveClass(/hidden/);
+
+    await page.locator('#touch-keyboard [data-touch-key="a"]').tap();
+    await page.waitForTimeout(120);
+    await expect(page.locator("#glide-trail")).toHaveClass(/hidden/);
+    await context.close();
+});
+
 test("typematic: holding a key fires it repeatedly", async ({ browser }) => {
     const { context, page } = await ready(browser);
     if (!(await touchSupported(page))) {

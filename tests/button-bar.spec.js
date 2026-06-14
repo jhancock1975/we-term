@@ -183,7 +183,7 @@ test("Settings button controls touch cursor blink", async ({ browser }) => {
     await page.waitForTimeout(200);
 
     var labels = await page.locator("#button-scroll .bar-btn").evaluateAll((buttons) => buttons.slice(0, 2).map((button) => button.textContent.trim()));
-    expect(labels).toEqual(["⚙", "Ctrl"]);
+    expect(labels).toEqual(["⚙", "Esc"]);
 
     // Blink on by default: the cursor overlay is animated.
     await expect(page.locator("#touch-cursor")).not.toHaveClass(/hidden/, { timeout: 2000 });

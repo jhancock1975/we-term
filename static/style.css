@@ -178,9 +178,27 @@ html, body {
     flex-direction: column;
     gap: 5px;
     flex-shrink: 0;
+    /* Anchor the absolutely-positioned #glide-trail canvas to the keyboard. */
+    position: relative;
 }
 
 #touch-keyboard.hidden {
+    display: none;
+}
+
+/* Glide trail: a finger-path curve drawn over the keys during a glide.
+   Sits above the keys but below #touch-key-preview (z-index 260). Never
+   captures touches so the glide gesture still reaches the keys. */
+#glide-trail {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 200;
+    pointer-events: none;
+}
+
+#glide-trail.hidden {
     display: none;
 }
 
