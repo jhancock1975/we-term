@@ -1091,9 +1091,41 @@ document.addEventListener("DOMContentLoaded", function () {
         }, 160);
     }
 
-    // Build the suggestion list: history + built-in commands (full-line) merged
-    // with server shell-completions (token-level). Each item carries the text
-    // to insert (the full resulting line) and a display label.
+    // Stem-aware dictionary suggestions for the last whitespace-delimited token.
+    // Returns up to ~6 word strings when the token "closely matches" English
+    // words from GLIDE_WORDS, else []. A word qualifies if it starts with the
+    // token, OR its stem equals the token's stem, OR the token's stem is a
+    // prefix of the word's stem. Ranked: prefix matches first, then stem
+    // matches, then GLIDE_WORDS frequency order. Empty when the token is under
+    // 2 chars, non-alphabetic, or has no qualifying words.
+    function wordCandidates(token) {
+        if (!token || token.length < 2 || !/^[a-z]+$/i.test(token)) return [];
+        if (typeof window.stemWord !== "function" || !window.GLIDE_WORDS) return [];
+        var t = token.toLowerCase();
+        var tStem = window.stemWord(t);
+        var scored = [];
+        window.GLIDE_WORDS.forEach(function (w, idx) {
+            if (w === t) return; // already typed; nothing to complete
+            var isPrefix = w.indexOf(t) === 0;
+            var wStem = window.stemWord(w);
+            var stemMatch = wStem === tStem || wStem.indexOf(tStem) === 0;
+            if (!isPrefix && !stemMatch) return;
+            // rank: prefix (0) before stem-only (1), then frequency (idx)
+            scored.push({ word: w, rank: isPrefix ? 0 : 1, idx: idx });
+        });
+        scored.sort(function (a, b) {
+            if (a.rank !== b.rank) return a.rank - b.rank;
+            return a.idx - b.idx;
+        });
+        return scored.slice(0, 6).map(function (s) { return s.word; });
+    }
+
+    // Build the suggestion list. When the last token closely matches English
+    // words, stem-aware word candidates lead the bar; the existing command
+    // sources (history full-line, built-in COMMON_COMMANDS at command
+    // position, server shell-completions token-level) follow, deduped. When
+    // there's no word match, behaves exactly as before. Each item carries the
+    // full resulting line to insert and a display label. Capped at 12.
     function buildItems() {
         var prefix = currentLine;
         var p = prefix.toLowerCase();
@@ -1104,6 +1136,13 @@ document.addEventListener("DOMContentLoaded", function () {
             seen[insert] = 1;
             out.push({ display: display, insert: insert });
         }
+        var lastSpace = prefix.lastIndexOf(" ");
+        var head = lastSpace >= 0 ? prefix.slice(0, lastSpace + 1) : "";
+        var lastToken = lastSpace >= 0 ? prefix.slice(lastSpace + 1) : prefix;
+        var wc = wordCandidates(lastToken);
+        wc.forEach(function (w) {
+            add(w, head + w);
+        });
         commandHistory.forEach(function (h) {
             if (h.toLowerCase().indexOf(p) === 0) add(h, h);
         });
@@ -1113,8 +1152,6 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         if (serverCompletions.line === prefix && serverCompletions.candidates.length) {
-            var lastSpace = prefix.lastIndexOf(" ");
-            var head = lastSpace >= 0 ? prefix.slice(0, lastSpace + 1) : "";
             serverCompletions.candidates.forEach(function (cand) {
                 add(cand, head + cand);
             });
