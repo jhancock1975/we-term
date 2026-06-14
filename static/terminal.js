@@ -1559,6 +1559,21 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!visible) {
             shiftActive = false;
             symbolMode = false;
+            // Hiding the keyboard mid-hold must kill any typematic repeat, or
+            // the interval keeps typing into the shell with no key on screen.
+            if (kbdHoldTimer) {
+                clearTimeout(kbdHoldTimer);
+                kbdHoldTimer = null;
+            }
+            if (kbdRepeatTimer) {
+                clearInterval(kbdRepeatTimer);
+                kbdRepeatTimer = null;
+            }
+            kbdTouchId = null;
+            kbdStartKey = null;
+            kbdKeyFired = false;
+            glidePath = [];
+            gliding = false;
             hideTouchKeyPreview();
         }
         renderTouchKeyboard();
@@ -2062,6 +2077,12 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             }
             btn.textContent = def.label;
+            // Preserve a latched modifier's visual active state across re-renders
+            // (e.g. toggling bar config while Ctrl/Meta is armed).
+            var modName = def.attrs && def.attrs["data-modifier"];
+            if (modName && modifiers[modName]) {
+                btn.classList.add("active");
+            }
             scroll.appendChild(btn);
             bindBarButton(btn);
         }
