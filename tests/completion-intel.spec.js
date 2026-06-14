@@ -174,9 +174,11 @@ test("Word candidate lookup is bounded and fast for a short token", async ({ bro
     var page = result.page;
     await gotoReady(page);
 
+    // Use a heavy 2-char prefix so the binary-search + bounded forward scan
+    // actually runs (a 1-char token early-returns before the scan).
     var info = await page.evaluate(() => {
         var t0 = performance.now();
-        var words = window.__wordCandidates("s");
+        var words = window.__wordCandidates("co");
         var dt = performance.now() - t0;
         return { count: words.length, dt: dt };
     });
