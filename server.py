@@ -22,15 +22,26 @@ class PtySession:
         self.pid = None
         self.ws = None
         self.read_task = None
+        self.monitor_task = None
         self.alive = False
         self.buffer = bytearray()
         self.max_buffer = 64 * 1024
+        self.hidden_input = False
 
     def spawn(self):
         master_fd, slave_fd = pty.openpty()
 
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
+        # Flush each command to the history file as it's entered so the live
+        # session's history is readable immediately (best-effort; a user rc may
+        # override PROMPT_COMMAND). History suggestions are sourced from this
+        # file, never from client-side keystroke tracking.
+        existing_pc = env.get("PROMPT_COMMAND")
+        env["PROMPT_COMMAND"] = "history -a" + (";" + existing_pc if existing_pc else "")
+        env.setdefault("HISTFILE", os.path.join(os.path.expanduser("~"), ".bash_history"))
+        env["HISTSIZE"] = "5000"
+        env["HISTFILESIZE"] = "10000"
 
         pid = os.fork()
         if pid == 0:
@@ -49,6 +60,50 @@ class PtySession:
         self.pid = pid
         self.alive = True
         self.read_task = asyncio.create_task(self._read_pty())
+        self.monitor_task = asyncio.create_task(self._monitor_termios())
+
+    def _read_hidden_input(self):
+        """True when the slave tty is reading hidden input (a password).
+
+        A password read (getpass/sudo/ssh, bash `read -s`) puts the line
+        discipline in canonical mode with echo OFF (ICANON set, ECHO clear).
+        The interactive bash/readline prompt is the opposite — raw mode with
+        ICANON clear — so this reliably distinguishes a password prompt from
+        the normal prompt, where screen-scraping the prompt text does not.
+        """
+        if self.master_fd is None:
+            return False
+        try:
+            lflag = termios.tcgetattr(self.master_fd)[3]
+        except (OSError, termios.error):
+            return False
+        return not (lflag & termios.ECHO) and bool(lflag & termios.ICANON)
+
+    async def _send_control(self, obj):
+        if self.ws is not None and not self.ws.closed:
+            try:
+                await self.ws.send_str(json.dumps(obj))
+            except (ConnectionError, OSError):
+                pass
+
+    async def _monitor_termios(self):
+        """Poll the tty echo/canon state and push hidden-input transitions.
+
+        Polling (vs. an event) is necessary because termios changes aren't
+        select()-observable; tcgetattr is a cheap syscall so a ~120ms cadence
+        is negligible and still flips before the user can type a full secret.
+        """
+        try:
+            while self.alive:
+                hidden = self._read_hidden_input()
+                if hidden != self.hidden_input:
+                    self.hidden_input = hidden
+                    await self._send_control({"type": "hidden", "value": hidden})
+                await asyncio.sleep(0.12)
+        except asyncio.CancelledError:
+            raise
+        except OSError:
+            pass
 
     def is_alive(self):
         if not self.alive or self.pid is None:
@@ -69,6 +124,9 @@ class PtySession:
         if self.buffer:
             await ws.send_bytes(bytes(self.buffer))
             self.buffer.clear()
+
+        # Re-assert hidden-input state so a reconnect mid-password is safe.
+        await self._send_control({"type": "hidden", "value": self.hidden_input})
 
     def detach(self):
         self.ws = None
@@ -115,6 +173,9 @@ class PtySession:
         if self.read_task is not None:
             self.read_task.cancel()
             self.read_task = None
+        if self.monitor_task is not None:
+            self.monitor_task.cancel()
+            self.monitor_task = None
         if self.pid is not None:
             try:
                 os.kill(self.pid, signal.SIGTERM)
@@ -275,6 +336,40 @@ def _run_compgen(mode, token, cwd):
         return []
 
 
+def _read_shell_history(limit=300):
+    """Recent shell commands, most-recent-first, deduped.
+
+    Read from the shell's HISTFILE so suggestions reflect real shell history
+    (everything typed at the shell) rather than client-tracked keystrokes.
+    Skips blank lines and bash timestamp comment lines (`#<epoch>`).
+    """
+    path = os.environ.get("HISTFILE") or os.path.join(
+        os.path.expanduser("~"), ".bash_history"
+    )
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    out = []
+    seen = set()
+    for line in reversed(lines):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def history_handler(request):
+    return web.json_response({"history": _read_shell_history()})
+
+
 async def complete_handler(request):
     try:
         data = await request.json()
@@ -304,6 +399,7 @@ app.router.add_get("/ws", websocket_handler)
 app.router.add_get("/", index_handler)
 app.router.add_post("/upload", upload_handler)
 app.router.add_post("/complete", complete_handler)
+app.router.add_get("/history", history_handler)
 app.router.add_static("/static", STATIC_DIR)
 
 if __name__ == "__main__":

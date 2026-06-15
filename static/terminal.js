@@ -223,6 +223,34 @@ document.addEventListener("DOMContentLoaded", function () {
     var reconnectDelay = 500;
     var maxReconnectDelay = 5000;
     var currentDelay = reconnectDelay;
+    // Set from the server when the shell is reading hidden input (a password).
+    // Authoritative; suppresses all input tracking and suggestions. See
+    // setServerHiddenInput.
+    var serverHiddenInput = false;
+
+    // Terminal data arrives as binary frames; the server uses text frames only
+    // for JSON control messages (e.g. hidden-input state). Returns true if the
+    // frame was a recognized control message (and must NOT be written to the
+    // terminal).
+    function handleControlMessage(data) {
+        if (typeof data !== "string") {
+            return false;
+        }
+        var msg;
+        try {
+            msg = JSON.parse(data);
+        } catch (e) {
+            return false;
+        }
+        if (!msg || typeof msg !== "object") {
+            return false;
+        }
+        if (msg.type === "hidden") {
+            setServerHiddenInput(!!msg.value);
+            return true;
+        }
+        return false;
+    }
 
     function connectWs() {
         var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -237,7 +265,7 @@ document.addEventListener("DOMContentLoaded", function () {
         ws.addEventListener("message", function (event) {
             if (event.data instanceof ArrayBuffer) {
                 term.write(new Uint8Array(event.data));
-            } else {
+            } else if (!handleControlMessage(event.data)) {
                 term.write(event.data);
             }
         });
@@ -985,8 +1013,18 @@ document.addEventListener("DOMContentLoaded", function () {
     // plus a trailing space. Only active in JS-keyboard mode (system-keyboard
     // input goes through xterm's textarea and isn't tracked here).
     var autocompleteBar = document.getElementById("autocomplete-bar");
-    var historyStorageKey = "we-term-history";
-    var commandHistory = loadHistory();
+    // Command history for suggestions comes from the SHELL's history file (via
+    // the server /history endpoint), never from persisted client keystrokes:
+    // passwords are never shell commands, so they cannot leak this way, and the
+    // user sees their real shell history. `sessionCommands` holds this session's
+    // just-entered commands so they appear immediately, before the shell flushes
+    // them to the file; it is in-memory only and never persisted.
+    var commandHistory = [];   // merged view used by the suggestion builders
+    var shellHistory = [];     // fetched from the server (HISTFILE)
+    var sessionCommands = [];  // entered this session; transient, not persisted
+    // Purge any legacy persisted history (may contain a secret captured before
+    // history moved server-side).
+    try { localStorage.removeItem("we-term-history"); } catch (e) { /* ignore */ }
     var currentLine = "";
     var autocompleteVisible = false;
     var acSuppressClickUntil = 0;
@@ -1003,35 +1041,77 @@ document.addEventListener("DOMContentLoaded", function () {
         "diff", "ln", "which", "date", "sleep",
     ];
 
-    function loadHistory() {
-        try {
-            var raw = localStorage.getItem(historyStorageKey);
-            var arr = raw ? JSON.parse(raw) : [];
-            return Array.isArray(arr) ? arr.slice(0, 100) : [];
-        } catch (e) {
-            return [];
+    // Merge this session's commands (most recent first) over the shell history,
+    // deduped, into the view the suggestion builders read.
+    function rebuildHistory() {
+        var out = [];
+        var seen = {};
+        function add(cmd) {
+            if (!cmd || seen[cmd]) return;
+            seen[cmd] = 1;
+            out.push(cmd);
         }
+        sessionCommands.forEach(add);
+        shellHistory.forEach(add);
+        commandHistory = out;
     }
 
-    function saveHistory() {
-        try {
-            localStorage.setItem(historyStorageKey, JSON.stringify(commandHistory.slice(0, 100)));
-        } catch (e) {
-            // ignore storage failures
-        }
+    // Pull the shell's history file from the server and refresh suggestions.
+    function refreshShellHistory() {
+        fetch("/history").then(function (r) {
+            return r.json();
+        }).then(function (data) {
+            shellHistory = (data && data.history) || [];
+            rebuildHistory();
+            renderAutocomplete();
+        }).catch(function () { /* best-effort */ });
     }
 
+    var historyRefreshTimer = null;
+    function scheduleHistoryRefresh() {
+        if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
+        // Give the shell a moment to flush the just-run command (PROMPT_COMMAND
+        // history -a) before re-reading the file.
+        historyRefreshTimer = setTimeout(refreshShellHistory, 350);
+    }
+
+    // Record a command entered this session so it appears immediately; the
+    // authoritative copy lives in the shell history file. In-memory only.
     function addToHistory(line) {
         line = (line || "").trim();
         if (!line) return;
-        commandHistory = commandHistory.filter(function (h) { return h !== line; });
-        commandHistory.unshift(line);
-        if (commandHistory.length > 100) commandHistory.length = 100;
-        saveHistory();
+        sessionCommands = sessionCommands.filter(function (h) { return h !== line; });
+        sessionCommands.unshift(line);
+        if (sessionCommands.length > 100) sessionCommands.length = 100;
+        rebuildHistory();
     }
 
+    // Prime the shell history now and keep it fresh while the keyboard is in use.
+    refreshShellHistory();
+    setInterval(function () {
+        if (autocompleteActive() && touchKeyboardVisible) {
+            refreshShellHistory();
+        }
+    }, 8000);
+
     function autocompleteActive() {
-        return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete && !passwordMode;
+        return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete && !passwordMode && !serverHiddenInput;
+    }
+
+    // Authoritative password/hidden-input signal from the server (derived from
+    // the tty's echo/canon flags). Far more reliable than scraping prompt text,
+    // so it's the primary defense; the prompt-text regex below is a fallback.
+    // On entering hidden mode we drop any partially-tracked line so keystrokes
+    // captured in the brief poll window before the signal arrived can't leak.
+    function setServerHiddenInput(value) {
+        if (serverHiddenInput === value) return;
+        serverHiddenInput = value;
+        if (value) {
+            currentLine = "";
+            serverCompletions = { line: null, candidates: [] };
+            glideCandidatesList = [];
+        }
+        renderAutocomplete();
     }
 
     // Never offer suggestions while a password/passphrase is being entered.
@@ -1064,6 +1144,19 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
+    // Coalesce suggestion-bar rebuilds onto an animation frame so the per-key
+    // path (which calls buildItems -> dictionary/history work) never blocks the
+    // keystroke handler. Keeps typing responsive and async from the bar render.
+    var renderScheduled = false;
+    function scheduleRender() {
+        if (renderScheduled) return;
+        renderScheduled = true;
+        requestAnimationFrame(function () {
+            renderScheduled = false;
+            renderAutocomplete();
+        });
+    }
+
     function trackAutocompleteInput(data) {
         // Any real keystroke invalidates stale glide suggestions: dismiss them.
         if (glideCandidatesList.length) { glideCandidatesList = []; }
@@ -1072,7 +1165,7 @@ document.addEventListener("DOMContentLoaded", function () {
             // Escape sequence (arrow keys, etc.) recalls/moves the shell line in
             // ways we can't track; drop our buffer rather than corrupt it.
             currentLine = "";
-            renderAutocomplete();
+            scheduleRender();
             scheduleCompletion();
             return;
         }
@@ -1081,6 +1174,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var code = data.charCodeAt(i);
             if (ch === "\r" || ch === "\n") {
                 addToHistory(currentLine);
+                scheduleHistoryRefresh();
                 currentLine = "";
             } else if (ch === "\x7f" || ch === "\b") {
                 currentLine = currentLine.slice(0, -1);
@@ -1094,7 +1188,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 currentLine += ch;
             }
         }
-        renderAutocomplete();
+        scheduleRender();
         scheduleCompletion();
     }
 
@@ -2247,22 +2341,66 @@ document.addEventListener("DOMContentLoaded", function () {
         focusTerminal();
     }
 
+    // The navigation keys repeat while held (typematic), like the on-screen
+    // keyboard keys. Toggles/actions (Esc, Tab, Ctrl, Sel, ...) do not.
+    function isRepeatableBarButton(btn) {
+        var key = btn.getAttribute("data-key");
+        return key === "up" || key === "down" || key === "left" || key === "right" ||
+            key === "pageup" || key === "pagedown";
+    }
+
     function bindBarButton(btn) {
         var touchStartX = 0;
         var touchStartY = 0;
+        var moved = false;
+        var fired = false;          // typematic already emitted this press
+        var holdTimer = null;
+        var repeatTimer = null;
+        var repeatable = isRepeatableBarButton(btn);
+
+        function clearBarTimers() {
+            if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+            if (repeatTimer) { clearInterval(repeatTimer); repeatTimer = null; }
+        }
 
         btn.addEventListener("touchstart", function (e) {
             touchStartX = e.touches[0].clientX;
             touchStartY = e.touches[0].clientY;
+            moved = false;
+            fired = false;
+            if (!repeatable) return;
+            clearBarTimers();
+            holdTimer = setTimeout(function () {
+                holdTimer = null;
+                if (moved) return;
+                handleBtnAction(btn);
+                fired = true;
+                repeatTimer = setInterval(function () {
+                    handleBtnAction(btn);
+                }, KBD_REPEAT_MS);
+            }, KBD_HOLD_MS);
+        }, { passive: true });
+
+        btn.addEventListener("touchmove", function (e) {
+            var dx = Math.abs(e.touches[0].clientX - touchStartX);
+            var dy = Math.abs(e.touches[0].clientY - touchStartY);
+            if (dx > 10 || dy > 10) {
+                moved = true;
+                clearBarTimers();
+            }
         }, { passive: true });
 
         btn.addEventListener("touchend", function (e) {
+            clearBarTimers();
             var dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
             var dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
             if (dx > 10 || dy > 10) return; // was a scroll, not a tap
             e.preventDefault();
+            if (fired) return; // typematic already handled this press
             handleBtnAction(btn);
         });
+
+        btn.addEventListener("touchcancel", clearBarTimers);
 
         btn.addEventListener("click", function (e) {
             e.preventDefault();
