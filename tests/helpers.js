@@ -1,5 +1,7 @@
 const { spawn } = require("child_process");
 const path = require("path");
+const os = require("os");
+const fs = require("fs");
 
 const TEST_PORT = 19090;
 const TEST_HOST = "127.0.0.1";
@@ -9,12 +11,21 @@ function startServer() {
     var venvPython = path.join(__dirname, "..", "venv", "bin", "python");
     var serverScript = path.join(__dirname, "..", "server.py");
 
+    // Isolated, empty history file per server so suggestions are deterministic
+    // and tests never read or pollute the developer's real ~/.bash_history.
+    var histFile = path.join(
+        os.tmpdir(),
+        "we-term-test-history-" + process.pid + "-" + Date.now()
+    );
+    try { fs.writeFileSync(histFile, ""); } catch (e) { /* ignore */ }
+
     var proc = spawn(venvPython, [serverScript], {
         cwd: path.join(__dirname, ".."),
         stdio: "pipe",
         env: Object.assign({}, process.env, {
             WETERM_HOST: TEST_HOST,
             WETERM_PORT: String(TEST_PORT),
+            HISTFILE: histFile,
         }),
     });
 

@@ -1144,6 +1144,19 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
+    // Coalesce suggestion-bar rebuilds onto an animation frame so the per-key
+    // path (which calls buildItems -> dictionary/history work) never blocks the
+    // keystroke handler. Keeps typing responsive and async from the bar render.
+    var renderScheduled = false;
+    function scheduleRender() {
+        if (renderScheduled) return;
+        renderScheduled = true;
+        requestAnimationFrame(function () {
+            renderScheduled = false;
+            renderAutocomplete();
+        });
+    }
+
     function trackAutocompleteInput(data) {
         // Any real keystroke invalidates stale glide suggestions: dismiss them.
         if (glideCandidatesList.length) { glideCandidatesList = []; }
@@ -1152,7 +1165,7 @@ document.addEventListener("DOMContentLoaded", function () {
             // Escape sequence (arrow keys, etc.) recalls/moves the shell line in
             // ways we can't track; drop our buffer rather than corrupt it.
             currentLine = "";
-            renderAutocomplete();
+            scheduleRender();
             scheduleCompletion();
             return;
         }
@@ -1175,7 +1188,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 currentLine += ch;
             }
         }
-        renderAutocomplete();
+        scheduleRender();
         scheduleCompletion();
     }
 
@@ -2328,22 +2341,66 @@ document.addEventListener("DOMContentLoaded", function () {
         focusTerminal();
     }
 
+    // The navigation keys repeat while held (typematic), like the on-screen
+    // keyboard keys. Toggles/actions (Esc, Tab, Ctrl, Sel, ...) do not.
+    function isRepeatableBarButton(btn) {
+        var key = btn.getAttribute("data-key");
+        return key === "up" || key === "down" || key === "left" || key === "right" ||
+            key === "pageup" || key === "pagedown";
+    }
+
     function bindBarButton(btn) {
         var touchStartX = 0;
         var touchStartY = 0;
+        var moved = false;
+        var fired = false;          // typematic already emitted this press
+        var holdTimer = null;
+        var repeatTimer = null;
+        var repeatable = isRepeatableBarButton(btn);
+
+        function clearBarTimers() {
+            if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+            if (repeatTimer) { clearInterval(repeatTimer); repeatTimer = null; }
+        }
 
         btn.addEventListener("touchstart", function (e) {
             touchStartX = e.touches[0].clientX;
             touchStartY = e.touches[0].clientY;
+            moved = false;
+            fired = false;
+            if (!repeatable) return;
+            clearBarTimers();
+            holdTimer = setTimeout(function () {
+                holdTimer = null;
+                if (moved) return;
+                handleBtnAction(btn);
+                fired = true;
+                repeatTimer = setInterval(function () {
+                    handleBtnAction(btn);
+                }, KBD_REPEAT_MS);
+            }, KBD_HOLD_MS);
+        }, { passive: true });
+
+        btn.addEventListener("touchmove", function (e) {
+            var dx = Math.abs(e.touches[0].clientX - touchStartX);
+            var dy = Math.abs(e.touches[0].clientY - touchStartY);
+            if (dx > 10 || dy > 10) {
+                moved = true;
+                clearBarTimers();
+            }
         }, { passive: true });
 
         btn.addEventListener("touchend", function (e) {
+            clearBarTimers();
             var dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
             var dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
             if (dx > 10 || dy > 10) return; // was a scroll, not a tap
             e.preventDefault();
+            if (fired) return; // typematic already handled this press
             handleBtnAction(btn);
         });
+
+        btn.addEventListener("touchcancel", clearBarTimers);
 
         btn.addEventListener("click", function (e) {
             e.preventDefault();
