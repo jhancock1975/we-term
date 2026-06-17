@@ -1234,15 +1234,6 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // Build a quick lookup set of GLIDE_WORDS for the common-word ranking boost.
-    var GLIDE_SET = null;
-    function glideSet() {
-        if (GLIDE_SET) return GLIDE_SET;
-        GLIDE_SET = {};
-        var g = window.GLIDE_WORDS || [];
-        for (var i = 0; i < g.length; i++) GLIDE_SET[g[i]] = 1;
-        return GLIDE_SET;
-    }
-
     // Dictionary suggestions for the last whitespace-delimited token. Returns up
     // to ~8 word strings derived from / extending the token (swim -> swims,
     // swimming, swimmer, swimsuit, ...), else []. Primary source is prefix
@@ -1252,33 +1243,48 @@ document.addEventListener("DOMContentLoaded", function () {
     // Ranked: shorter words first (frequency proxy), then GLIDE_WORDS-common
     // words, then alphabetical. Empty when the token is under 2 chars or
     // non-alphabetic.
+    var UNKNOWN_RANK = 1e9;
+
+    // Frequency rank of a word (0 = most common). Looked up from the aligned
+    // DICTIONARY_RANK via the sorted DICTIONARY; UNKNOWN_RANK if not present.
+    function wordRank(w) {
+        var dict = window.DICTIONARY, ranks = window.DICTIONARY_RANK;
+        if (!dict || !ranks) return UNKNOWN_RANK;
+        var i = lowerBound(dict, w);
+        if (i < dict.length && dict[i] === w) return ranks[i];
+        return UNKNOWN_RANK;
+    }
+
     function wordCandidates(token) {
         if (!token || token.length < 2 || !/^[a-z]+$/i.test(token)) return [];
         var t = token.toLowerCase();
         var dict = window.DICTIONARY || window.GLIDE_WORDS;
         if (!dict || !dict.length) return [];
 
-        var words = [];
+        var cands = [];   // { w: word, r: frequency rank }
         var seen = {};
-        var MAX_RAW = 40;
+        // Scan the WHOLE prefix range (bounded for safety) and rank by frequency
+        // afterwards - capping the scan alphabetically would drop common words
+        // (e.g. "and"/"any") in favour of rarer earlier ones (e.g. "anal").
+        var MAX_RANGE = 2000;
+        var ranks = window.DICTIONARY_RANK;
 
-        // Prefix matches via binary search + bounded forward scan. DICTIONARY is
-        // sorted; GLIDE_WORDS is not, so only the sorted dict gets the fast path.
         if (window.DICTIONARY) {
             var i = lowerBound(dict, t);
-            for (; i < dict.length && words.length < MAX_RAW; i++) {
+            var scanned = 0;
+            for (; i < dict.length && scanned < MAX_RANGE; i++, scanned++) {
                 var w = dict[i];
                 if (w.indexOf(t) !== 0) break; // past the prefix range
                 if (w === t || seen[w]) continue;
                 seen[w] = 1;
-                words.push(w);
+                cands.push({ w: w, r: ranks ? ranks[i] : UNKNOWN_RANK });
             }
         } else {
-            for (var j = 0; j < dict.length && words.length < MAX_RAW; j++) {
+            for (var j = 0; j < dict.length && cands.length < 60; j++) {
                 var dw = dict[j];
                 if (dw.indexOf(t) !== 0 || dw === t || seen[dw]) continue;
                 seen[dw] = 1;
-                words.push(dw);
+                cands.push({ w: dw, r: j });
             }
         }
 
@@ -1287,25 +1293,22 @@ document.addEventListener("DOMContentLoaded", function () {
         if (typeof window.stemWord === "function" && window.GLIDE_WORDS) {
             var tStem = window.stemWord(t);
             var g = window.GLIDE_WORDS;
-            for (var k = 0; k < g.length && words.length < MAX_RAW; k++) {
+            for (var k = 0; k < g.length; k++) {
                 var gw = g[k];
                 if (gw === t || seen[gw]) continue;
                 if (window.stemWord(gw) === tStem) {
                     seen[gw] = 1;
-                    words.push(gw);
+                    cands.push({ w: gw, r: wordRank(gw) });
                 }
             }
         }
 
-        var gset = glideSet();
-        words.sort(function (a, b) {
-            if (a.length !== b.length) return a.length - b.length; // shorter first
-            var ga = gset[a] ? 0 : 1;
-            var gb = gset[b] ? 0 : 1;
-            if (ga !== gb) return ga - gb; // common words first
-            return a < b ? -1 : (a > b ? 1 : 0); // alphabetical
+        cands.sort(function (a, b) {
+            if (a.r !== b.r) return a.r - b.r;            // more frequent first
+            if (a.w.length !== b.w.length) return a.w.length - b.w.length;
+            return a.w < b.w ? -1 : (a.w > b.w ? 1 : 0);  // alphabetical
         });
-        return words.slice(0, 8);
+        return cands.slice(0, 8).map(function (c) { return c.w; });
     }
 
     // Build the suggestion list. When the last token closely matches English

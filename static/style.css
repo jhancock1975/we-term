@@ -98,9 +98,11 @@ html, body {
     flex: 0 0 auto;
     max-width: 70vw;
     padding: 7px 12px;
-    background: #0e639c;
-    color: #fff;
-    border: none;
+    /* Muted, low-contrast styling: bright blue+white chips that reshuffle as you
+       type read like flashing/blinking text. Keep them quiet. */
+    background: #2a2d2e;
+    color: #b8b8b8;
+    border: 1px solid #3a3d3e;
     border-radius: 14px;
     font-family: var(--app-font);
     font-size: 13px;
@@ -109,6 +111,11 @@ html, body {
     text-overflow: ellipsis;
     cursor: pointer;
     touch-action: manipulation;
+}
+
+.ac-chip:active {
+    background: #37393a;
+    color: #e0e0e0;
 }
 
 #button-bar {
