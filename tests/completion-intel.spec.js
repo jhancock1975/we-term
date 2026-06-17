@@ -158,13 +158,30 @@ test("Inflected forms from the big dictionary surface for 'walk'", async ({ brow
     await result.context.close();
 });
 
-test("Shorter inflections rank before longer ones", async ({ browser }) => {
+test("Candidates are ordered by word frequency, not length", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var page = result.page;
     await gotoReady(page);
 
+    // "swimming" is far more common than "swims", so it ranks first despite
+    // being longer.
     var words = await page.evaluate(() => window.__wordCandidates("swim"));
-    expect(words.indexOf("swims")).toBeLessThan(words.indexOf("swimming"));
+    expect(words.indexOf("swimming")).toBeLessThan(words.indexOf("swims"));
+
+    await result.context.close();
+});
+
+test("Common words rank first; rare words like 'anal' don't surface for 'an'", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var page = result.page;
+    await gotoReady(page);
+
+    var words = await page.evaluate(() => window.__wordCandidates("an"));
+    // Frequent "an"-words lead.
+    expect(words).toContain("and");
+    expect(words).toContain("any");
+    // The rare word the user complained about must not be among the top picks.
+    expect(words).not.toContain("anal");
 
     await result.context.close();
 });
