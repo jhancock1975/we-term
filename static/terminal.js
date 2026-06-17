@@ -826,108 +826,75 @@ document.addEventListener("DOMContentLoaded", function () {
         setTouchKeyboardVisible(keyboardVisibleBeforeOverlay);
     }
 
-    function openSelectMode(clientX, clientY) {
-        captureKeyboardForOverlay();
+    // Position the selectable overlay exactly over the terminal's text area so
+    // selecting feels in-place rather than as a full-screen sheet.
+    function positionSelectOverlay() {
+        var screen = termEl.querySelector(".xterm-screen") || termEl;
+        var r = screen.getBoundingClientRect();
+        selectOverlay.style.top = r.top + "px";
+        selectOverlay.style.left = r.left + "px";
+        selectOverlay.style.width = r.width + "px";
+        selectOverlay.style.height = r.height + "px";
+    }
+
+    // Show the terminal's visible text as a selectable layer over the live
+    // terminal. We deliberately do NOT pre-select a word: iOS only shows its
+    // native Copy/Look Up callout for user-initiated selections, so the user
+    // long-presses the text and iOS owns the selection + callout.
+    function openSelectMode() {
         closeSettingsPanel(true);
         var lines = [];
         var renderedRows = termEl.querySelector(".xterm-rows");
         if (renderedRows && renderedRows.children.length > 0) {
-            for (var rowIndex = 0; rowIndex < renderedRows.children.length; rowIndex++) {
-                lines.push(renderedRows.children[rowIndex].textContent || "");
+            for (var i = 0; i < renderedRows.children.length; i++) {
+                lines.push(renderedRows.children[i].textContent || "");
             }
         }
-
         if (lines.join("").trim().length === 0) {
             var buffer = term.buffer.active;
-            for (var i = 0; i <= buffer.length - 1; i++) {
-                var line = buffer.getLine(i);
-                if (line) {
-                    lines.push(line.translateToString(true));
-                }
+            for (var j = 0; j <= buffer.length - 1; j++) {
+                var line = buffer.getLine(j);
+                if (line) lines.push(line.translateToString(true));
             }
         }
-
-        var charOffset = -1;
-        if (typeof clientX === "number" && typeof clientY === "number") {
-            charOffset = getTerminalCharOffset(clientX, clientY, lines);
-        }
-
         selectContent.textContent = lines.join("\n");
+        positionSelectOverlay();
         selectOverlay.classList.remove("hidden");
         clearSelection();
         lastSelectedText = "";
-        syncSelectState();
-        suppressSelectTapUntil = Date.now() + 350;
-
-        if (charOffset < 0 || !selectWordAtOffset(charOffset)) {
-            selectFirstWord();
-        }
-
-        requestAnimationFrame(function () {
-            var sel = window.getSelection();
-            if (sel.rangeCount > 0) {
-                var range = sel.getRangeAt(0);
-                var rect = range.getBoundingClientRect();
-                var containerRect = selectContent.getBoundingClientRect();
-                if (rect.top < containerRect.top || rect.bottom > containerRect.bottom) {
-                    selectContent.scrollTop += rect.top - containerRect.top - containerRect.height / 3;
-                }
-            }
-        });
+        // Ignore the tap that ends the activating long-press so it can't
+        // immediately dismiss the overlay.
+        suppressSelectTapUntil = Date.now() + 400;
     }
 
     function closeSelectMode() {
         clearSelection();
         lastSelectedText = "";
-        syncSelectState();
         selectOverlay.classList.add("hidden");
         selectContent.textContent = "";
-        restoreKeyboardAfterOverlay();
         focusTerminal();
     }
 
-    function doCopy() {
-        var selectedText = window.getSelection().toString() || lastSelectedText;
-        writeTextToClipboard(selectedText).then(function (copied) {
-            showToast(copied ? "Copied" : "Copy failed");
+    // A tap on the overlay that leaves no selection (not a long-press select,
+    // not a handle drag) dismisses select mode - no Done button needed.
+    selectOverlay.addEventListener("click", function () {
+        if (Date.now() < suppressSelectTapUntil) {
+            return;
+        }
+        var sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.toString().trim().length === 0) {
             closeSelectMode();
-        });
-    }
+        }
+    });
 
-    if (selectCopyBtn) {
-        selectCopyBtn.addEventListener("click", function (e) {
-            e.preventDefault();
-            doCopy();
-        });
-
-        selectCopyBtn.addEventListener("touchstart", function (e) { e.preventDefault(); });
-        selectCopyBtn.addEventListener("touchend", function (e) {
-            e.preventDefault();
-            doCopy();
-        });
-    }
-
-    if (selectDoneBtn) {
-        selectDoneBtn.addEventListener("click", function (e) {
-            e.preventDefault();
-            closeSelectMode();
-        });
-
-        selectDoneBtn.addEventListener("touchstart", function (e) { e.preventDefault(); });
-        selectDoneBtn.addEventListener("touchend", function (e) {
-            e.preventDefault();
-            closeSelectMode();
-        });
-    }
-
-    document.addEventListener("selectionchange", function () {
+    // When the user taps iOS's native "Copy" (or copies on desktop), the browser
+    // puts the selection on the clipboard itself; we just confirm and dismiss.
+    document.addEventListener("copy", function () {
         if (selectOverlay.classList.contains("hidden")) {
             return;
         }
-        if (hasActiveSelection()) {
-            lastSelectedText = window.getSelection().toString();
-            syncSelectState();
-        }
+        showToast("Copied");
+        closeSelectMode();
     });
 
     // --- Paste overlay ---
