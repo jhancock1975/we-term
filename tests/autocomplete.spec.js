@@ -49,6 +49,18 @@ async function gotoReady(page) {
     await page.waitForTimeout(600);
     await page.locator("#terminal .xterm-screen").tap(); // show keyboard
     await page.waitForTimeout(300);
+    // The shell session is shared across tests in this file; a prior test may
+    // have left a partial line on the prompt (e.g. tapped a suggestion without
+    // Enter). Kill it with Ctrl-U so history-based assertions are deterministic.
+    // Only when the JS keyboard is up (system-keyboard mode has no 'u' key).
+    var kbHidden = await page.locator("#touch-keyboard")
+        .evaluate(function (el) { return el.classList.contains("hidden"); })
+        .catch(function () { return true; });
+    if (!kbHidden) {
+        await page.locator('#button-scroll [data-modifier="ctrl"]').tap();
+        await page.locator('[data-touch-key="u"]').tap();
+        await page.waitForTimeout(100);
+    }
 }
 
 async function typeViaKeys(page, str) {
