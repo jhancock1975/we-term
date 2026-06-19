@@ -33,6 +33,7 @@ async function newTouchPage(browser, permissions) {
     return { context: context, page: page };
 }
 
+// The on-screen keyboard long-press (>600ms) enters select mode. Use 750ms.
 async function longPressTerminal(page, offsetX, offsetY, delayMs) {
     var screen = page.locator("#terminal .xterm-screen");
     var box = await screen.boundingBox();
@@ -56,7 +57,7 @@ async function longPressTerminal(page, offsetX, offsetY, delayMs) {
                 resolve();
             }, delayMs);
         });
-    }, { clientX: clientX, clientY: clientY, delayMs: delayMs || 600 });
+    }, { clientX: clientX, clientY: clientY, delayMs: delayMs || 750 });
 }
 
 async function ensureTouchTerminalOutput(page) {
@@ -84,9 +85,6 @@ async function ensureKeyboardVisible(page) {
     }
 }
 
-// Type via the on-screen keyboard. On touch devices the xterm textarea is
-// locked down (un-focusable to suppress the iOS keyboard), so page.keyboard
-// cannot reach the terminal - the custom keyboard is the real input path.
 async function typeViaKeys(page, str) {
     for (var i = 0; i < str.length; i++) {
         var ch = str[i];
@@ -123,209 +121,126 @@ async function waitForTerminalText(page, text, timeout) {
     }, { timeout: timeout || 5000 }).toContain(text);
 }
 
-test("Long press opens select overlay with toolbar", async ({ browser }) => {
-    var result = await newTouchPage(browser);
-    var context = result.context;
-    var page = result.page;
-
-    await page.goto("/");
-    await waitForTerminalReady(page);
-    await ensureTouchTerminalOutput(page);
-
-    await longPressTerminal(page, 72, 24, 650);
-
-    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
-    await expect(page.locator("#select-toolbar")).toBeVisible();
-    await expect(page.locator("#select-copy-btn")).toBeVisible();
-    await expect(page.locator("#select-done-btn")).toBeVisible();
-    await expect(page.locator("#select-label")).toHaveText("Select text, then tap Copy");
-
-    await context.close();
-});
-
-test("Copy button copies selected text to clipboard", async ({ browser, browserName }) => {
-    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
-    var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
-    var context = result.context;
-    var page = result.page;
-
-    await page.goto("/");
-    await waitForTerminalReady(page);
-    await ensureTouchTerminalOutput(page);
-
-    await longPressTerminal(page, 72, 24, 650);
-    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 5000 });
-
-    await page.waitForFunction(() => {
-        return document.getElementById("select-overlay").dataset.selectedText.trim().length > 0;
-    }, {}, { timeout: 5000 });
-
-    var selectedText = await page.evaluate(() => {
-        return document.getElementById("select-overlay").dataset.selectedText;
-    });
-    expect(selectedText.trim().length).toBeGreaterThan(0);
-
-    await page.locator("#select-copy-btn").click();
-
-    await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
-    await expect(page.locator("#toast")).toHaveClass(/show/, { timeout: 2000 });
-
-    var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboardText).toBe(selectedText);
-
-    await context.close();
-});
-
-test("Copy button works via touch tap", async ({ browser, browserName }) => {
-    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
-    var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
-    var context = result.context;
-    var page = result.page;
-
-    await page.goto("/");
-    await waitForTerminalReady(page);
-    await ensureTouchTerminalOutput(page);
-
-    await longPressTerminal(page, 72, 24, 650);
-    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
-    await page.waitForFunction(() => {
-        return document.getElementById("select-overlay").dataset.selectedText.trim().length > 0;
-    }, {}, { timeout: 3000 });
-
-    var selectedText = await page.evaluate(() => {
-        return document.getElementById("select-overlay").dataset.selectedText;
-    });
-
-    await page.locator("#select-copy-btn").tap();
-
-    await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
-
-    var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboardText).toBe(selectedText);
-
-    await context.close();
-});
-
-test("Done button closes select overlay without copying", async ({ browser, browserName }) => {
-    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
-    var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
-    var context = result.context;
-    var page = result.page;
-
-    await page.goto("/");
-    await waitForTerminalReady(page);
-    await ensureTouchTerminalOutput(page);
-
-    await page.evaluate(() => navigator.clipboard.writeText("SENTINEL"));
-
-    await longPressTerminal(page, 72, 24, 650);
-    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
-    await page.waitForFunction(() => {
-        return document.getElementById("select-overlay").dataset.selectedText.trim().length > 0;
-    }, {}, { timeout: 3000 });
-
-    await page.locator("#select-done-btn").tap();
-
-    await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
-
-    var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboardText).toBe("SENTINEL");
-
-    await context.close();
-});
-
-test("Copy works with fallback when clipboard API is unavailable", async ({ browser }) => {
-    var result = await newTouchPage(browser);
-    var context = result.context;
-    var page = result.page;
-
-    await page.addInitScript(() => {
-        window.__fallbackCopyText = "";
-        Object.defineProperty(window, "isSecureContext", {
-            configurable: true,
-            get: function () { return false; },
-        });
-        document.execCommand = function (command) {
-            if (command !== "copy") return false;
-            var active = document.activeElement;
-            window.__fallbackCopyText = active && "value" in active ? active.value : "";
-            return true;
-        };
-    });
-
-    await page.goto("/");
-    await waitForTerminalReady(page);
-    await ensureTouchTerminalOutput(page);
-
-    await longPressTerminal(page, 72, 24, 650);
-    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 5000 });
-    await page.waitForFunction(() => {
-        return document.getElementById("select-overlay").dataset.selectedText.trim().length > 0;
-    }, {}, { timeout: 5000 });
-
-    var selectedText = await page.evaluate(() => {
-        return document.getElementById("select-overlay").dataset.selectedText;
-    });
-
-    await page.locator("#select-copy-btn").tap();
-    await expect(page.locator("#toast")).toHaveClass(/show/, { timeout: 2000 });
-
-    var copiedText = await page.evaluate(() => window.__fallbackCopyText);
-    expect(copiedText).toBe(selectedText);
-
-    await context.close();
-});
-
-test("Copy specific text from bash echo output", async ({ browser, browserName }) => {
-    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
-    var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
-    var context = result.context;
-    var page = result.page;
-
-    await page.goto("/");
-    await waitForTerminalReady(page);
-
-    await typeInTerminal(page, "echo COPY_TEST_MARKER_12345");
-    await waitForTerminalText(page, "COPY_TEST_MARKER_12345");
-
-    await longPressTerminal(page, 72, 24, 650);
-    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
-
-    var overlayText = await page.evaluate(() => {
-        return document.getElementById("select-content").textContent;
-    });
-    expect(overlayText).toContain("COPY_TEST_MARKER_12345");
-
-    await page.evaluate(() => {
-        var textNode = document.getElementById("select-content").firstChild;
-        if (!textNode) return;
-        var text = textNode.textContent;
-        var start = text.indexOf("COPY_TEST_MARKER_12345");
-        if (start < 0) return;
-        var end = start + "COPY_TEST_MARKER_12345".length;
+// Select a marker substring (or the first word) inside the in-place overlay,
+// mimicking the user's native long-press selection. Returns the selected text.
+async function selectInOverlay(page, marker) {
+    return await page.evaluate((marker) => {
+        var node = document.getElementById("select-content").firstChild;
+        if (!node) return "";
+        var text = node.textContent || "";
+        var start = marker ? text.indexOf(marker) : text.search(/\S/);
+        if (start < 0) return "";
+        var end;
+        if (marker) {
+            end = start + marker.length;
+        } else {
+            end = start;
+            while (end < text.length && /\S/.test(text[end])) end++;
+        }
         var range = document.createRange();
-        range.setStart(textNode, start);
-        range.setEnd(textNode, end);
+        range.setStart(node, start);
+        range.setEnd(node, end);
         var sel = window.getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
-    });
+        return sel.toString();
+    }, marker);
+}
 
-    await page.waitForTimeout(200);
+// Trigger the browser's native copy of the current selection - the desktop
+// equivalent of tapping iOS's "Copy" callout.
+async function nativeCopy(page) {
+    return await page.evaluate(() => document.execCommand("copy"));
+}
 
-    await page.locator("#select-copy-btn").tap();
+async function dismissOverlay(page) {
+    // Past the open-suppression window, a tap with no selection dismisses.
+    await page.waitForTimeout(500);
+    await page.evaluate(() => { var s = window.getSelection(); if (s) s.removeAllRanges(); });
+    await page.locator("#select-overlay").tap();
+}
+
+test("Long press opens an in-place select overlay (no full-screen sheet, no toolbar)", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var page = result.page;
+
+    await page.goto("/");
+    await waitForTerminalReady(page);
+    await ensureTouchTerminalOutput(page);
+
+    await longPressTerminal(page, 72, 24, 750);
+    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
+
+    // No Copy/Done toolbar - selection is native iOS, dismissed by tapping away.
+    expect(await page.locator("#select-copy-btn").count()).toBe(0);
+    expect(await page.locator("#select-done-btn").count()).toBe(0);
+
+    // Shows the terminal's text, positioned in place over the terminal area.
+    var overlayText = await page.evaluate(() => document.getElementById("select-content").textContent);
+    expect(overlayText.trim().length).toBeGreaterThan(0);
+    var ov = await page.locator("#select-overlay").boundingBox();
+    var scr = await page.locator("#terminal .xterm-screen").boundingBox();
+    expect(Math.abs(ov.x - scr.x)).toBeLessThan(4);
+    expect(Math.abs(ov.y - scr.y)).toBeLessThan(4);
+
+    await result.context.close();
+});
+
+test("Selecting text then copying puts it on the clipboard and dismisses", async ({ browser, browserName }) => {
+    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
+    var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
+    var page = result.page;
+
+    await page.goto("/");
+    await waitForTerminalReady(page);
+    await typeInTerminal(page, "echo COPY_TEST_MARKER_12345");
+    await waitForTerminalText(page, "COPY_TEST_MARKER_12345");
+
+    await longPressTerminal(page, 72, 24, 750);
+    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
+
+    var overlayText = await page.evaluate(() => document.getElementById("select-content").textContent);
+    expect(overlayText).toContain("COPY_TEST_MARKER_12345");
+
+    var selected = await selectInOverlay(page, "COPY_TEST_MARKER_12345");
+    expect(selected).toBe("COPY_TEST_MARKER_12345");
+
+    await nativeCopy(page);
+
     await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
+    await expect(page.locator("#toast")).toHaveClass(/show/, { timeout: 2000 });
 
     var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboardText).toBe("COPY_TEST_MARKER_12345");
 
-    await context.close();
+    await result.context.close();
 });
 
-test("Copy text from screen session", async ({ browser, browserName }) => {
+test("Tapping the overlay with no selection dismisses without copying", async ({ browser, browserName }) => {
     test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
     var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
-    var context = result.context;
+    var page = result.page;
+
+    await page.goto("/");
+    await waitForTerminalReady(page);
+    await ensureTouchTerminalOutput(page);
+    await page.evaluate(() => navigator.clipboard.writeText("SENTINEL"));
+
+    await longPressTerminal(page, 72, 24, 750);
+    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
+
+    await dismissOverlay(page);
+
+    await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
+    var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboardText).toBe("SENTINEL");
+
+    await result.context.close();
+});
+
+test("Copy specific text from a screen session", async ({ browser, browserName }) => {
+    test.skip(browserName !== "chromium", "clipboard read/write not available in Playwright WebKit");
+    var result = await newTouchPage(browser, ["clipboard-read", "clipboard-write"]);
     var page = result.page;
 
     await page.goto("/");
@@ -335,38 +250,16 @@ test("Copy text from screen session", async ({ browser, browserName }) => {
     await page.waitForTimeout(500);
     await typeInTerminal(page, "screen -r test_session");
     await page.waitForTimeout(1000);
-
     await typeInTerminal(page, "echo SCREEN_COPY_TEST_67890");
-    await page.waitForTimeout(500);
-
     await waitForTerminalText(page, "SCREEN_COPY_TEST_67890");
 
-    await longPressTerminal(page, 72, 24, 650);
+    await longPressTerminal(page, 72, 24, 750);
     await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
 
-    var overlayText = await page.evaluate(() => {
-        return document.getElementById("select-content").textContent;
-    });
-    expect(overlayText).toContain("SCREEN_COPY_TEST_67890");
+    var selected = await selectInOverlay(page, "SCREEN_COPY_TEST_67890");
+    expect(selected).toBe("SCREEN_COPY_TEST_67890");
 
-    await page.evaluate(() => {
-        var textNode = document.getElementById("select-content").firstChild;
-        if (!textNode) return;
-        var text = textNode.textContent;
-        var start = text.indexOf("SCREEN_COPY_TEST_67890");
-        if (start < 0) return;
-        var end = start + "SCREEN_COPY_TEST_67890".length;
-        var range = document.createRange();
-        range.setStart(textNode, start);
-        range.setEnd(textNode, end);
-        var sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-    });
-
-    await page.waitForTimeout(200);
-
-    await page.locator("#select-copy-btn").tap();
+    await nativeCopy(page);
     await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
 
     var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
@@ -375,12 +268,11 @@ test("Copy text from screen session", async ({ browser, browserName }) => {
     await typeInTerminal(page, "exit");
     await page.waitForTimeout(500);
 
-    await context.close();
+    await result.context.close();
 });
 
-test("Sel button in bar opens select mode", async ({ browser }) => {
+test("Sel button opens in-place select mode; tapping away dismisses", async ({ browser }) => {
     var result = await newTouchPage(browser);
-    var context = result.context;
     var page = result.page;
 
     await page.goto("/");
@@ -392,10 +284,10 @@ test("Sel button in bar opens select mode", async ({ browser }) => {
 
     await page.locator("#select-btn").tap();
     await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
-    await expect(page.locator("#select-toolbar")).toBeVisible();
+    expect(await page.locator("#select-copy-btn").count()).toBe(0);
 
-    await page.locator("#select-done-btn").tap();
+    await dismissOverlay(page);
     await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
 
-    await context.close();
+    await result.context.close();
 });

@@ -71,7 +71,7 @@
             <p>As you type on the on&#8209;screen keyboard, a suggestion bar appears above the buttons with matching commands from your history and common commands. Tap one to fill it in &mdash; a trailing space is added automatically. (Available with the on&#8209;screen keyboard.)</p>
 
             <h2>Copy &amp; paste</h2>
-            <p><strong>Long&#8209;press</strong> the terminal (or tap <strong>Sel</strong>) to open select mode. Adjust the selection, then tap <strong>Copy</strong>. To paste, tap <strong>Paste</strong>, long&#8209;press the box and choose Paste, then tap <strong>Send</strong>. Images can be pasted too.</p>
+            <p><strong>Long&#8209;press</strong> the terminal (or tap <strong>Sel</strong>) to select text in place. Drag the handles to adjust, then tap <strong>Copy</strong> on the menu iOS shows. Tap elsewhere to dismiss. To paste, tap <strong>Paste</strong>, long&#8209;press the box and choose Paste, then tap <strong>Send</strong>. Images can be pasted too.</p>
 
             <h2>Settings (&#9881;)</h2>
             <ul>
@@ -87,14 +87,7 @@
             <p>When <strong>Use system keyboard</strong> is on, tap the terminal to bring up your device keyboard. A <strong>&#9881;</strong> appears in the top&#8209;right &mdash; tap it to open Settings and switch back to the on&#8209;screen keyboard.</p>
         </div>
     </div>
-    <div id="select-overlay" class="hidden">
-        <div id="select-toolbar">
-            <span id="select-label">Select text, then tap Copy</span>
-            <button id="select-copy-btn" type="button">Copy</button>
-            <button id="select-done-btn" type="button">Done</button>
-        </div>
-        <pre id="select-content"></pre>
-    </div>
+    <div id="select-overlay" class="hidden"><pre id="select-content"></pre></div>
     <div id="paste-overlay" class="hidden">
         <div id="paste-toolbar">
             <span id="paste-label">Long-press below to paste, then tap Send</span>

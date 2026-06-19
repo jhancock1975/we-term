@@ -32,11 +32,7 @@ test("All critical DOM elements exist after page load", async ({ page }) => {
             "toast",
             "settings-panel",
             "select-overlay",
-            "select-toolbar",
-            "select-copy-btn",
-            "select-done-btn",
             "select-content",
-            "select-label",
             "paste-overlay",
             "paste-area",
             "paste-send-btn",
@@ -280,7 +276,7 @@ test("Terminal is not obscured by overlays at startup", async ({ browser }) => {
     await context.close();
 });
 
-test("Select overlay toolbar has Copy and Done buttons", async ({ browser }) => {
+test("Select overlay is toolbar-free (native in-place selection)", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var context = result.context;
     var page = result.page;
@@ -289,26 +285,23 @@ test("Select overlay toolbar has Copy and Done buttons", async ({ browser }) => 
     await page.waitForSelector("#terminal .xterm-screen", { timeout: 10000 });
     await page.waitForTimeout(1500);
 
-    var toolbarState = await page.evaluate(() => {
-        var copyBtn = document.getElementById("select-copy-btn");
-        var doneBtn = document.getElementById("select-done-btn");
-        var label = document.getElementById("select-label");
+    // The redesign drops the Copy/Done toolbar in favour of iOS's native
+    // selection callout; only the selectable content remains.
+    var state = await page.evaluate(() => {
         return {
-            copyExists: !!copyBtn,
-            copyText: copyBtn ? copyBtn.textContent.trim() : null,
-            doneExists: !!doneBtn,
-            doneText: doneBtn ? doneBtn.textContent.trim() : null,
-            labelExists: !!label,
-            labelText: label ? label.textContent.trim() : null,
+            overlay: !!document.getElementById("select-overlay"),
+            content: !!document.getElementById("select-content"),
+            toolbar: !!document.getElementById("select-toolbar"),
+            copyBtn: !!document.getElementById("select-copy-btn"),
+            doneBtn: !!document.getElementById("select-done-btn"),
         };
     });
 
-    expect(toolbarState.copyExists).toBe(true);
-    expect(toolbarState.copyText).toBe("Copy");
-    expect(toolbarState.doneExists).toBe(true);
-    expect(toolbarState.doneText).toBe("Done");
-    expect(toolbarState.labelExists).toBe(true);
-    expect(toolbarState.labelText).toBe("Select text, then tap Copy");
+    expect(state.overlay).toBe(true);
+    expect(state.content).toBe(true);
+    expect(state.toolbar).toBe(false);
+    expect(state.copyBtn).toBe(false);
+    expect(state.doneBtn).toBe(false);
 
     await context.close();
 });

@@ -16,9 +16,6 @@ test.afterAll(async () => {
 // (Times New Roman) because no font-family was set on them or their ancestors.
 const SELECTORS = [
     "#toast",
-    "#select-label",
-    "#select-copy-btn",
-    "#select-done-btn",
     "#paste-label",
     "#paste-area",
     "#paste-send-btn",

@@ -123,7 +123,10 @@ test("Select content renders like the terminal (pre, no word-break, matching lin
     var selectText = await page.locator("#select-content").evaluate((el) => el.textContent);
     expect(selectText).toContain(marker);
 
-    await page.locator("#select-done-btn").tap();
+    // Dismiss the in-place overlay by tapping away (no Done button).
+    await page.waitForTimeout(500);
+    await page.evaluate(() => { var s = window.getSelection(); if (s) s.removeAllRanges(); });
+    await page.locator("#select-overlay").tap();
     await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
 
     await context.close();
