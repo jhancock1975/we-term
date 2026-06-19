@@ -34,7 +34,7 @@ async function keyboardHidden(page) {
     return await page.locator("#touch-keyboard").evaluate((el) => el.classList.contains("hidden"));
 }
 
-test("Keyboard shown -> select -> Done -> keyboard shown again", async ({ browser }) => {
+test("Keyboard shown -> select (stays up, in-place) -> dismiss -> still shown", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var context = result.context;
     var page = result.page;
@@ -47,13 +47,15 @@ test("Keyboard shown -> select -> Done -> keyboard shown again", async ({ browse
 
     await page.locator("#select-btn").tap();
     await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
-    // Keyboard hides behind the overlay while selecting.
-    await expect(page.locator("#touch-keyboard")).toHaveClass(/hidden/, { timeout: 3000 });
+    // In-place selection no longer hides the keyboard.
+    await expect(page.locator("#touch-keyboard")).not.toHaveClass(/hidden/, { timeout: 1000 });
 
-    await page.locator("#select-done-btn").tap();
+    // Dismiss by tapping away (no Done button).
+    await page.waitForTimeout(500);
+    await page.evaluate(() => { var s = window.getSelection(); if (s) s.removeAllRanges(); });
+    await page.locator("#select-overlay").tap();
     await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
 
-    // Keyboard should be restored to its prior shown state.
     await expect(page.locator("#touch-keyboard")).not.toHaveClass(/hidden/, { timeout: 3000 });
 
     await context.close();
@@ -82,7 +84,7 @@ test("Keyboard shown -> paste -> Cancel -> keyboard shown again", async ({ brows
     await context.close();
 });
 
-test("Keyboard hidden -> select -> Done -> keyboard stays hidden", async ({ browser }) => {
+test("Keyboard hidden -> select -> dismiss -> stays hidden", async ({ browser }) => {
     var result = await newTouchPage(browser);
     var context = result.context;
     var page = result.page;
@@ -96,7 +98,9 @@ test("Keyboard hidden -> select -> Done -> keyboard stays hidden", async ({ brow
     await page.locator("#select-btn").tap();
     await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
 
-    await page.locator("#select-done-btn").tap();
+    await page.waitForTimeout(500);
+    await page.evaluate(() => { var s = window.getSelection(); if (s) s.removeAllRanges(); });
+    await page.locator("#select-overlay").tap();
     await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
 
     // Must not force-show the keyboard.

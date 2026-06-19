@@ -557,8 +557,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     var selectOverlay = document.getElementById("select-overlay");
     var selectContent = document.getElementById("select-content");
-    var selectCopyBtn = document.getElementById("select-copy-btn");
-    var selectDoneBtn = document.getElementById("select-done-btn");
     var lastSelectedText = "";
     var suppressSelectTapUntil = 0;
     var longPressTimer = null;
@@ -573,234 +571,6 @@ document.addEventListener("DOMContentLoaded", function () {
         if (selection) {
             selection.removeAllRanges();
         }
-    }
-
-    function syncSelectState() {
-        selectOverlay.dataset.selectedText = lastSelectedText;
-        selectOverlay.dataset.hasSelection = lastSelectedText.trim().length > 0 ? "true" : "false";
-    }
-
-    function hasActiveSelection() {
-        var selection = window.getSelection();
-        return !!selection && !selection.isCollapsed && selection.toString().trim().length > 0;
-    }
-
-    function getCaretRangeFromPoint(clientX, clientY) {
-        if (document.caretRangeFromPoint) {
-            return document.caretRangeFromPoint(clientX, clientY);
-        }
-        if (document.caretPositionFromPoint) {
-            var position = document.caretPositionFromPoint(clientX, clientY);
-            if (!position) {
-                return null;
-            }
-            var range = document.createRange();
-            range.setStart(position.offsetNode, position.offset);
-            range.collapse(true);
-            return range;
-        }
-        return null;
-    }
-
-    function selectWordAtPoint(clientX, clientY) {
-        var rangeAtPoint = getCaretRangeFromPoint(clientX, clientY);
-        var textNode = selectContent.firstChild;
-        if (!rangeAtPoint || !textNode || textNode.nodeType !== Node.TEXT_NODE) {
-            return false;
-        }
-
-        var text = textNode.textContent || "";
-        if (!text) {
-            return false;
-        }
-
-        var offset = rangeAtPoint.startOffset;
-        if (offset >= text.length) {
-            offset = text.length - 1;
-        }
-
-        while (offset < text.length && /\s/.test(text.charAt(offset))) {
-            offset += 1;
-        }
-        if (offset >= text.length) {
-            offset = rangeAtPoint.startOffset - 1;
-            while (offset >= 0 && /\s/.test(text.charAt(offset))) {
-                offset -= 1;
-            }
-        }
-        if (offset < 0 || offset >= text.length) {
-            return false;
-        }
-
-        var start = offset;
-        var end = offset + 1;
-        while (start > 0 && !/\s/.test(text.charAt(start - 1))) {
-            start -= 1;
-        }
-        while (end < text.length && !/\s/.test(text.charAt(end))) {
-            end += 1;
-        }
-
-        var selectionRange = document.createRange();
-        selectionRange.setStart(textNode, start);
-        selectionRange.setEnd(textNode, end);
-
-        var selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(selectionRange);
-        lastSelectedText = selection.toString();
-        syncSelectState();
-        return true;
-    }
-
-    function selectFirstWord() {
-        var textNode = selectContent.firstChild;
-        if (!textNode || textNode.nodeType !== Node.TEXT_NODE) {
-            return false;
-        }
-        var text = textNode.textContent || "";
-        var match = text.match(/\S+/);
-        if (!match) {
-            return false;
-        }
-
-        var start = match.index;
-        var end = start + match[0].length;
-        var selectionRange = document.createRange();
-        selectionRange.setStart(textNode, start);
-        selectionRange.setEnd(textNode, end);
-
-        var selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(selectionRange);
-        lastSelectedText = selection.toString();
-        syncSelectState();
-        return true;
-    }
-
-    function getTerminalCharOffset(clientX, clientY, lines) {
-        var renderedRows = termEl.querySelector(".xterm-rows");
-        if (!renderedRows || renderedRows.children.length === 0) {
-            return -1;
-        }
-        var rowIndex = -1;
-        for (var i = 0; i < renderedRows.children.length; i++) {
-            var rect = renderedRows.children[i].getBoundingClientRect();
-            if (clientY >= rect.top && clientY <= rect.bottom) {
-                rowIndex = i;
-                break;
-            }
-        }
-        if (rowIndex === -1) {
-            return -1;
-        }
-        var rowRect = renderedRows.children[rowIndex].getBoundingClientRect();
-        var cellWidth = rowRect.width / term.cols;
-        var col = Math.floor((clientX - rowRect.left) / cellWidth);
-        col = Math.max(0, col);
-        var offset = 0;
-        for (var i = 0; i < rowIndex && i < lines.length; i++) {
-            offset += lines[i].length + 1;
-        }
-        if (rowIndex < lines.length) {
-            offset += Math.min(col, lines[rowIndex].length);
-        }
-        return offset;
-    }
-
-    function selectWordAtOffset(offset) {
-        var textNode = selectContent.firstChild;
-        if (!textNode || textNode.nodeType !== Node.TEXT_NODE) {
-            return false;
-        }
-        var text = textNode.textContent || "";
-        if (!text || offset < 0 || offset >= text.length) {
-            return false;
-        }
-        if (/\s/.test(text.charAt(offset))) {
-            var fwd = offset;
-            while (fwd < text.length && /\s/.test(text.charAt(fwd))) {
-                fwd++;
-            }
-            if (fwd < text.length) {
-                offset = fwd;
-            } else {
-                var bwd = offset;
-                while (bwd >= 0 && /\s/.test(text.charAt(bwd))) {
-                    bwd--;
-                }
-                if (bwd >= 0) {
-                    offset = bwd;
-                } else {
-                    return false;
-                }
-            }
-        }
-        var start = offset;
-        var end = offset + 1;
-        while (start > 0 && !/\s/.test(text.charAt(start - 1))) {
-            start--;
-        }
-        while (end < text.length && !/\s/.test(text.charAt(end))) {
-            end++;
-        }
-        var selectionRange = document.createRange();
-        selectionRange.setStart(textNode, start);
-        selectionRange.setEnd(textNode, end);
-        var selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(selectionRange);
-        lastSelectedText = selection.toString();
-        syncSelectState();
-        return true;
-    }
-
-    function legacyCopyText(text) {
-        var activeElement = document.activeElement;
-        var textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.setAttribute("aria-hidden", "true");
-        textarea.setAttribute("readonly", "readonly");
-        textarea.style.position = "fixed";
-        textarea.style.top = "0";
-        textarea.style.left = "-9999px";
-        textarea.style.width = "1px";
-        textarea.style.height = "1px";
-        textarea.style.padding = "0";
-        textarea.style.border = "0";
-        textarea.style.opacity = "0.01";
-        textarea.style.pointerEvents = "none";
-        textarea.style.fontSize = "16px";
-        document.body.appendChild(textarea);
-        textarea.focus({ preventScroll: true });
-        textarea.select();
-        textarea.setSelectionRange(0, textarea.value.length);
-        var copied = false;
-        try {
-            copied = document.execCommand("copy");
-        } catch (err) {
-            copied = false;
-        }
-        textarea.blur();
-        document.body.removeChild(textarea);
-        if (activeElement && activeElement.focus) {
-            activeElement.focus({ preventScroll: true });
-        }
-        return copied;
-    }
-
-    function writeTextToClipboard(text) {
-        if (!text) {
-            return Promise.resolve(false);
-        }
-        if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
-            return navigator.clipboard.writeText(text).then(function () {
-                return true;
-            }, function () {
-                return legacyCopyText(text);
-            });
-        }
-        return Promise.resolve(legacyCopyText(text));
     }
 
     // Save the keyboard's current visibility before an overlay hides it, then
@@ -892,12 +662,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // When the user taps iOS's native "Copy" (or copies on desktop), the browser
     // puts the selection on the clipboard itself; we just confirm and dismiss.
+    // Defer the close: closeSelectMode clears the selection, and doing that
+    // synchronously inside the copy event would empty it before the browser's
+    // default copy reads it (clipboard would come out blank).
     document.addEventListener("copy", function () {
         if (selectOverlay.classList.contains("hidden")) {
             return;
         }
         showToast("Copied");
-        closeSelectMode();
+        setTimeout(closeSelectMode, 0);
     });
 
     // --- Paste overlay ---
@@ -1482,7 +1255,10 @@ document.addEventListener("DOMContentLoaded", function () {
     function applyModifiers(seq) {
         if (modifiers.ctrl && seq.length === 1) {
             var code = seq.toUpperCase().charCodeAt(0);
-            if (code >= 64 && code <= 95) {
+            if (code === 32) {
+                // Ctrl-Space = Ctrl-@ = NUL (e.g. emacs set-mark), not a space.
+                seq = "\x00";
+            } else if (code >= 64 && code <= 95) {
                 seq = String.fromCharCode(code - 64);
             }
         }
@@ -2004,8 +1780,8 @@ document.addEventListener("DOMContentLoaded", function () {
             longPressTimer = setTimeout(function () {
                 longPressTriggered = true;
                 suppressTerminalClickUntil = Date.now() + 500;
-                openSelectMode(touchStartX, touchStartY);
-            }, 450);
+                openSelectMode();
+            }, 600);
         }, { passive: true, capture: true });
 
         termEl.addEventListener("touchmove", function (e) {
@@ -2295,8 +2071,7 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
         if (action === "select") {
-            var rect = termEl.getBoundingClientRect();
-            openSelectMode(rect.left + 48, rect.top + 24);
+            openSelectMode();
             return;
         }
         if (action === "paste") {
