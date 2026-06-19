@@ -96,6 +96,9 @@ document.addEventListener("DOMContentLoaded", function () {
     term.loadAddon(fitAddon);
     term.open(document.getElementById("terminal"));
     fitAddon.fit();
+    // Test seam: write display bytes to xterm (same as server output). Affects
+    // only the rendered screen, never the shell/PTY.
+    window.__termWrite = function (s) { try { term.write(s); } catch (e) { /* ignore */ } };
     var termEl = document.getElementById("terminal");
     var settingsPanel = document.getElementById("settings-panel");
     var settingsCloseBtn = document.getElementById("settings-close-btn");
@@ -980,15 +983,14 @@ document.addEventListener("DOMContentLoaded", function () {
     // plus a trailing space. Only active in JS-keyboard mode (system-keyboard
     // input goes through xterm's textarea and isn't tracked here).
     var autocompleteBar = document.getElementById("autocomplete-bar");
-    // Command history for suggestions comes from the SHELL's history file (via
-    // the server /history endpoint), never from persisted client keystrokes:
-    // passwords are never shell commands, so they cannot leak this way, and the
-    // user sees their real shell history. `sessionCommands` holds this session's
-    // just-entered commands so they appear immediately, before the shell flushes
-    // them to the file; it is in-memory only and never persisted.
-    var commandHistory = [];   // merged view used by the suggestion builders
+    // Command history for suggestions comes ONLY from the SHELL's history file
+    // (via the server /history endpoint), never from client-tracked keystrokes.
+    // This is essential for safety: anything typed into an application/TUI input
+    // (e.g. a password typed into a program's prompt, or a full-screen app's text
+    // field) is NOT a shell command, so it never appears here. Real shell
+    // commands reach the file via the shell's PROMPT_COMMAND `history -a`.
+    var commandHistory = [];   // suggestion history (mirrors the shell history)
     var shellHistory = [];     // fetched from the server (HISTFILE)
-    var sessionCommands = [];  // entered this session; transient, not persisted
     // Purge any legacy persisted history (may contain a secret captured before
     // history moved server-side).
     try { localStorage.removeItem("we-term-history"); } catch (e) { /* ignore */ }
@@ -1008,49 +1010,29 @@ document.addEventListener("DOMContentLoaded", function () {
         "diff", "ln", "which", "date", "sleep",
     ];
 
-    // Merge this session's commands (most recent first) over the shell history,
-    // deduped, into the view the suggestion builders read.
-    function rebuildHistory() {
-        var out = [];
-        var seen = {};
-        function add(cmd) {
-            if (!cmd || seen[cmd]) return;
-            seen[cmd] = 1;
-            out.push(cmd);
-        }
-        sessionCommands.forEach(add);
-        shellHistory.forEach(add);
-        commandHistory = out;
-    }
-
     // Pull the shell's history file from the server and refresh suggestions.
     function refreshShellHistory() {
         fetch("/history").then(function (r) {
             return r.json();
         }).then(function (data) {
             shellHistory = (data && data.history) || [];
-            rebuildHistory();
+            commandHistory = shellHistory;
             renderAutocomplete();
         }).catch(function () { /* best-effort */ });
     }
 
-    var historyRefreshTimer = null;
+    var historyRefreshTimers = [];
     function scheduleHistoryRefresh() {
-        if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
-        // Give the shell a moment to flush the just-run command (PROMPT_COMMAND
-        // history -a) before re-reading the file.
-        historyRefreshTimer = setTimeout(refreshShellHistory, 350);
-    }
-
-    // Record a command entered this session so it appears immediately; the
-    // authoritative copy lives in the shell history file. In-memory only.
-    function addToHistory(line) {
-        line = (line || "").trim();
-        if (!line) return;
-        sessionCommands = sessionCommands.filter(function (h) { return h !== line; });
-        sessionCommands.unshift(line);
-        if (sessionCommands.length > 100) sessionCommands.length = 100;
-        rebuildHistory();
+        for (var i = 0; i < historyRefreshTimers.length; i++) {
+            clearTimeout(historyRefreshTimers[i]);
+        }
+        // The shell flushes the just-run command (PROMPT_COMMAND `history -a`) at
+        // its next prompt; re-read a couple of times so the new command shows
+        // promptly regardless of exactly when the flush lands.
+        historyRefreshTimers = [
+            setTimeout(refreshShellHistory, 300),
+            setTimeout(refreshShellHistory, 1300),
+        ];
     }
 
     // Prime the shell history now and keep it fresh while the keyboard is in use.
@@ -1062,7 +1044,20 @@ document.addEventListener("DOMContentLoaded", function () {
     }, 8000);
 
     function autocompleteActive() {
-        return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete && !passwordMode && !serverHiddenInput;
+        return touchKeyboardEnabled && !settings.systemKeyboard && settings.autocomplete &&
+            !passwordMode && !serverHiddenInput && !inAlternateScreen();
+    }
+
+    // Full-screen apps (vim, less, htop, Claude Code, ...) run on the terminal's
+    // alternate screen buffer. Command completion is meaningless there, and -
+    // critically - their text inputs are not shell commands, so suppress all
+    // tracking and suggestions while the alternate screen is active.
+    function inAlternateScreen() {
+        try {
+            return term.buffer.active.type === "alternate";
+        } catch (e) {
+            return false;
+        }
     }
 
     // Authoritative password/hidden-input signal from the server (derived from
@@ -1140,7 +1135,8 @@ document.addEventListener("DOMContentLoaded", function () {
             var ch = data[i];
             var code = data.charCodeAt(i);
             if (ch === "\r" || ch === "\n") {
-                addToHistory(currentLine);
+                // Don't record the typed line client-side; just re-read the
+                // shell's history file shortly (the shell flushes it on Enter).
                 scheduleHistoryRefresh();
                 currentLine = "";
             } else if (ch === "\x7f" || ch === "\b") {
@@ -1410,6 +1406,18 @@ document.addEventListener("DOMContentLoaded", function () {
 
         // Detect password/passphrase prompts from terminal output as it renders.
         term.onRender(detectPasswordPrompt);
+
+        // Re-render the suggestion bar when entering/leaving the alternate screen
+        // so it hides in full-screen apps (where autocomplete is suppressed) and
+        // returns at the shell prompt.
+        var lastAltScreen = inAlternateScreen();
+        term.onRender(function () {
+            var alt = inAlternateScreen();
+            if (alt !== lastAltScreen) {
+                lastAltScreen = alt;
+                renderAutocomplete();
+            }
+        });
     }
 
     function uploadImage(blob) {
