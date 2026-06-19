@@ -81,3 +81,33 @@ test("password typed at a hidden-input (read -s) prompt never enters history or 
 
     await result.context.close();
 });
+
+// A full-screen app (Claude Code, vim, ...) runs on the terminal's alternate
+// screen. Its text inputs are NOT shell commands, so anything typed there (e.g.
+// a password typed into the app's prompt) must never be tracked or suggested.
+test("text typed in a full-screen (alternate-screen) app never enters suggestions", async ({ browser }) => {
+    var result = await newTouchPage(browser);
+    var page = result.page;
+    await gotoReady(page);
+
+    // Enter the alternate screen buffer (what a full-screen TUI does).
+    await page.evaluate(() => window.__termWrite("\x1b[?1049h"));
+    await page.waitForTimeout(150);
+
+    // Type a secret into the "app". Autocomplete must be fully suppressed.
+    await typeViaKeys(page, "appsecret");
+    await page.waitForTimeout(300);
+    await expect(page.locator("#autocomplete-bar")).toHaveClass(/hidden/);
+
+    // Leave the alternate screen (app exits).
+    await page.evaluate(() => window.__termWrite("\x1b[?1049l"));
+    await page.waitForTimeout(300);
+
+    // Back at the shell, the secret must not appear as a suggestion.
+    var chips = await page.locator("#autocomplete-bar .ac-chip").allTextContents();
+    expect(chips.join("\n")).not.toContain("appsecret");
+    var legacy = await page.evaluate(() => localStorage.getItem("we-term-history"));
+    expect(legacy).toBeNull();
+
+    await result.context.close();
+});
