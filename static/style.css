@@ -193,25 +193,6 @@ html, body {
     display: none;
 }
 
-/* Short (e.g. phone-in-landscape) viewports: the full-size keys would fill the
-   screen. Cap the keyboard at half the viewport and let the rows/keys shrink to
-   fit so the terminal stays visible. Only when the viewport is actually short,
-   so tall landscape screens keep full-size keys. */
-@media (orientation: landscape) and (max-height: 480px) {
-    #touch-keyboard {
-        max-height: 50vh;
-        max-height: 50dvh;
-    }
-    .touch-keyboard-row {
-        min-height: 0;
-    }
-    .touch-key {
-        min-height: 0;
-        padding: 6px 0;
-        font-size: 14px;
-    }
-}
-
 /* Glide trail: a finger-path curve drawn over the keys during a glide.
    Sits above the keys but below #touch-key-preview (z-index 260). Never
    captures touches so the glide gesture still reaches the keys. */
@@ -618,4 +599,30 @@ html, body {
     line-height: 1.4;
     -webkit-user-select: text;
     user-select: text;
+}
+
+/* Short (e.g. phone-in-landscape) viewports: full-size keys would fill the
+   screen. Cap the keyboard at half the viewport and let the rows/keys shrink to
+   fit so the terminal stays visible. Placed after the base keyboard rules so
+   these overrides win (media queries add no specificity; source order decides).
+   Gated to short viewports so tall landscape screens keep full-size keys. */
+@media (orientation: landscape) and (max-height: 600px) {
+    #touch-keyboard {
+        max-height: 50vh;
+        max-height: 50dvh;
+        /* Backstop: never let the rows spill past the cap onto the terminal. */
+        overflow: hidden;
+    }
+    /* Let the rows share the capped height so the keys SHRINK to fit instead of
+       overflowing (min-height:0 is required for a flex child to shrink below
+       its content). */
+    .touch-keyboard-row {
+        min-height: 0;
+        flex: 1 1 0;
+    }
+    .touch-key {
+        min-height: 0;
+        padding: 4px 0;
+        font-size: 13px;
+    }
 }

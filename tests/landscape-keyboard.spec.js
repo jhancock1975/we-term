@@ -29,6 +29,14 @@ test("In landscape, the on-screen keyboard uses at most half the viewport", asyn
     // Keyboard occupies at most half the viewport height (small tolerance).
     expect(kb.height).toBeLessThanOrEqual(viewport.height * 0.5 + 2);
 
+    // Critically: the keyboard's BOTTOM must not run past the viewport (the old
+    // bug let non-shrinking rows overflow the cap and cover the terminal).
+    expect(kb.y + kb.height).toBeLessThanOrEqual(viewport.height + 2);
+
+    // The actual key cells must also fit within the keyboard box (no spill).
+    var lastKey = await page.locator("#touch-keyboard .touch-key").last().boundingBox();
+    expect(lastKey.y + lastKey.height).toBeLessThanOrEqual(kb.y + kb.height + 2);
+
     // The terminal stays visible above it.
     var term = await page.locator("#terminal").boundingBox();
     expect(term.height).toBeGreaterThan(40);
