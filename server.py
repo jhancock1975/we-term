@@ -15,6 +15,52 @@ from aiohttp import web
 UPLOAD_DIR = os.path.join(os.path.expanduser("~"), "we-term-uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# we-term manages a screenrc so that `screen` (started inside we-term) keeps a
+# large scrollback and, with "Full-screen app scrollback" on, runs with
+# `altscreen off` -- so full-screen apps (Claude Code, codex, vim, less, ...)
+# write into screen's scrollback instead of the no-history alternate screen,
+# letting copy mode (Ctrl-A [) scroll back through them. We point $SCREENRC at
+# this file; it sources the user's own ~/.screenrc first, then applies overrides
+# (later settings win), so the user's config is preserved.
+WETERM_DIR = os.path.join(os.path.expanduser("~"), ".we-term")
+MANAGED_SCREENRC = os.path.join(WETERM_DIR, "screenrc")
+
+
+def write_managed_screenrc(altscreen_off=True):
+    """(Re)write the managed screenrc. Returns the file path."""
+    os.makedirs(WETERM_DIR, exist_ok=True)
+    user_rc = os.path.join(os.path.expanduser("~"), ".screenrc")
+    lines = [
+        "# Managed by we-term. Do not edit; toggle via the we-term settings.",
+    ]
+    if os.path.isfile(user_rc) and os.path.abspath(user_rc) != os.path.abspath(MANAGED_SCREENRC):
+        # Absolute path: screen's `source` does not expand $HOME.
+        lines.append('source "%s"' % user_rc)
+    lines += [
+        "defscrollback 50000",
+        "compacthist on",
+        # altscreen off => full-screen apps land in scrollback (scrollable).
+        # altscreen on  => normal behavior (apps restore the prior screen).
+        "altscreen " + ("off" if altscreen_off else "on"),
+    ]
+    if altscreen_off:
+        # Belt-and-suspenders: also stop advertising the alternate-screen
+        # capability to apps running under screen.
+        lines.append("termcapinfo xterm* ti@:te@")
+    with open(MANAGED_SCREENRC, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return MANAGED_SCREENRC
+
+
+def managed_screenrc_altscreen_off():
+    """True if the managed screenrc currently has altscreen off."""
+    try:
+        with open(MANAGED_SCREENRC, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return True  # default state we write on first spawn
+    return "altscreen off" in text
+
 
 class PtySession:
     def __init__(self):
@@ -42,6 +88,17 @@ class PtySession:
         env.setdefault("HISTFILE", os.path.join(os.path.expanduser("~"), ".bash_history"))
         env["HISTSIZE"] = "5000"
         env["HISTFILESIZE"] = "10000"
+
+        # Point `screen` at the we-term-managed screenrc (scrollback-friendly),
+        # unless the user has deliberately set their own $SCREENRC. Create it on
+        # first spawn if missing, preserving any prior toggle state.
+        try:
+            if not os.path.isfile(MANAGED_SCREENRC):
+                write_managed_screenrc(altscreen_off=True)
+            if not env.get("SCREENRC"):
+                env["SCREENRC"] = MANAGED_SCREENRC
+        except OSError:
+            pass  # never block shell spawn on screenrc setup
 
         pid = os.fork()
         if pid == 0:
@@ -394,12 +451,34 @@ async def complete_handler(request):
     return web.json_response({"candidates": candidates, "token": token})
 
 
+async def screen_config_handler(request):
+    """Read or toggle the managed screenrc's "full-screen app scrollback" mode.
+
+    GET  -> {"altscreenOff": bool}
+    POST {"altscreenOff": bool} -> rewrites the managed screenrc and returns the
+    new state. Takes effect for screen sessions started after the change.
+    """
+    if request.method == "POST":
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        altscreen_off = bool(data.get("altscreenOff", True))
+        try:
+            write_managed_screenrc(altscreen_off=altscreen_off)
+        except OSError:
+            return web.json_response({"error": "could not write screenrc"}, status=500)
+    return web.json_response({"altscreenOff": managed_screenrc_altscreen_off()})
+
+
 app = web.Application(middlewares=[no_cache_middleware])
 app.router.add_get("/ws", websocket_handler)
 app.router.add_get("/", index_handler)
 app.router.add_post("/upload", upload_handler)
 app.router.add_post("/complete", complete_handler)
 app.router.add_get("/history", history_handler)
+app.router.add_get("/screen-config", screen_config_handler)
+app.router.add_post("/screen-config", screen_config_handler)
 app.router.add_static("/static", STATIC_DIR)
 
 if __name__ == "__main__":

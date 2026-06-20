@@ -246,27 +246,33 @@ test("Copy specific text from a screen session", async ({ browser, browserName }
     await page.goto("/");
     await waitForTerminalReady(page);
 
-    await typeInTerminal(page, "screen -dmS test_session");
-    await page.waitForTimeout(500);
-    await typeInTerminal(page, "screen -r test_session");
-    await page.waitForTimeout(1000);
-    await typeInTerminal(page, "echo SCREEN_COPY_TEST_67890");
-    await waitForTerminalText(page, "SCREEN_COPY_TEST_67890");
+    try {
+        await typeInTerminal(page, "screen -dmS test_session");
+        await page.waitForTimeout(500);
+        await typeInTerminal(page, "screen -r test_session");
+        await page.waitForTimeout(1000);
+        await typeInTerminal(page, "echo SCREEN_COPY_TEST_67890");
+        await waitForTerminalText(page, "SCREEN_COPY_TEST_67890");
 
-    await longPressTerminal(page, 72, 24, 750);
-    await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
+        await longPressTerminal(page, 72, 24, 750);
+        await expect(page.locator("#select-overlay")).not.toHaveClass(/hidden/, { timeout: 3000 });
 
-    var selected = await selectInOverlay(page, "SCREEN_COPY_TEST_67890");
-    expect(selected).toBe("SCREEN_COPY_TEST_67890");
+        var selected = await selectInOverlay(page, "SCREEN_COPY_TEST_67890");
+        expect(selected).toBe("SCREEN_COPY_TEST_67890");
 
-    await nativeCopy(page);
-    await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
+        await nativeCopy(page);
+        await expect(page.locator("#select-overlay")).toHaveClass(/hidden/, { timeout: 3000 });
 
-    var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboardText).toBe("SCREEN_COPY_TEST_67890");
+        var clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+        expect(clipboardText).toBe("SCREEN_COPY_TEST_67890");
 
-    await typeInTerminal(page, "exit");
-    await page.waitForTimeout(500);
+        await typeInTerminal(page, "exit");
+        await page.waitForTimeout(500);
+    } finally {
+        // Always reap the session so a failed run doesn't orphan a screen.
+        await typeInTerminal(page, "screen -X -S test_session quit").catch(() => {});
+        await page.waitForTimeout(200);
+    }
 
     await result.context.close();
 });
