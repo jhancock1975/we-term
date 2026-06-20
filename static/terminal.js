@@ -13,6 +13,10 @@ document.addEventListener("DOMContentLoaded", function () {
         { id: "paste", label: "Paste", attrs: { "data-action": "paste" }, elId: "paste-btn" },
         { id: "pageup", label: "PgUp", attrs: { "data-key": "pageup" } },
         { id: "pagedown", label: "PgDn", attrs: { "data-key": "pagedown" } },
+        // Enter GNU screen copy/scrollback mode (Ctrl-A then [), so PgUp/PgDn
+        // and the arrows scroll back through a full-screen app's history. Esc
+        // leaves copy mode. See docs/SCROLLBACK.md.
+        { id: "screen-copy", label: "Scrl", settingsLabel: "Screen scrollback (copy mode)", attrs: { "data-key": "screencopy" } },
         { id: "up", label: "▲", settingsLabel: "Up", attrs: { "data-key": "up" } },
         { id: "down", label: "▼", settingsLabel: "Down", attrs: { "data-key": "down" } },
         { id: "left", label: "◀", settingsLabel: "Left", attrs: { "data-key": "left" } },
@@ -1250,6 +1254,8 @@ document.addEventListener("DOMContentLoaded", function () {
         escape: "\x1b",
         backspace: "\x7f",
         space: " ",
+        // GNU screen: Ctrl-A then [ enters copy/scrollback mode.
+        screencopy: "\x01[",
     };
 
     function applyModifiers(seq) {
