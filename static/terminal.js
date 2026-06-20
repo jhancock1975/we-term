@@ -111,6 +111,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var systemKeyboardToggle = document.getElementById("system-keyboard-toggle");
     var autocompleteToggle = document.getElementById("autocomplete-toggle");
     var glideTypingToggle = document.getElementById("glide-typing-toggle");
+    var screenScrollbackToggle = document.getElementById("screen-scrollback-toggle");
     var keyboardGearEl = document.getElementById("keyboard-gear");
     var helpOverlay = document.getElementById("help-overlay");
     var helpBtn = document.getElementById("help-btn");
@@ -371,6 +372,12 @@ document.addEventListener("DOMContentLoaded", function () {
         if (glideTypingToggle) {
             glideTypingToggle.checked = settings.glideTyping;
         }
+        // Server-backed setting: reflect the managed screenrc's current state.
+        if (screenScrollbackToggle) {
+            fetch("/screen-config").then(function (r) { return r.json(); }).then(function (d) {
+                screenScrollbackToggle.checked = !!(d && d.altscreenOff);
+            }).catch(function () { /* leave as-is */ });
+        }
         syncButtonBarOptions();
     }
 
@@ -425,6 +432,26 @@ document.addEventListener("DOMContentLoaded", function () {
         glideTypingToggle.addEventListener("change", function () {
             settings.glideTyping = glideTypingToggle.checked;
             saveSettings(settings);
+        });
+    }
+
+    // Server-backed: rewrites the managed screenrc (altscreen off => full-screen
+    // apps land in screen's scrollback). Applies to NEW screen sessions.
+    if (screenScrollbackToggle) {
+        screenScrollbackToggle.addEventListener("change", function () {
+            var on = screenScrollbackToggle.checked;
+            fetch("/screen-config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ altscreenOff: on }),
+            }).then(function (r) { return r.json(); }).then(function (d) {
+                screenScrollbackToggle.checked = !!(d && d.altscreenOff);
+                showToast(on
+                    ? "On — start a new screen session"
+                    : "Off — start a new screen session");
+            }).catch(function () {
+                showToast("Couldn't update setting");
+            });
         });
     }
 
